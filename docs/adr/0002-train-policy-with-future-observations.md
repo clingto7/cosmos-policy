@@ -1,0 +1,3 @@
+# Train the first policy with future observations and no value target
+
+The first Bench2Dex policy will jointly learn the 16-step active-joint action chunk, the future active-joint state, and future images from all four cameras. Bench2Dex demonstrations do not provide return labels, so value prediction must be explicitly excluded from the training loss; the dataset's placeholder value is not a target. This preserves Cosmos Policy's future-observation training signal while avoiding a fabricated reward objective. Action-only training and learned value prediction remain separate later experiments.

@@ -1,0 +1,3 @@
+# Require a measured pilot before training all tasks
+
+Run task 03 and one task with a different robot embodiment before expanding to all 26 tasks. Confirm data and active-joint mapping, pretrained weight loading, checkpoint save and restore, and closed-loop simulation first. Evaluate increasing training budgets on fixed pilot seeds; treat success rate as approximately plateaued only when two consecutive evaluation intervals each improve by less than about five percentage points with no clear upward trend. Choose the interval and episode count after measuring training and simulation throughput. If either pilot has zero success, diagnose it before scaling out. This gate prevents expensive repetitions of an invalid or poorly calibrated adaptation.

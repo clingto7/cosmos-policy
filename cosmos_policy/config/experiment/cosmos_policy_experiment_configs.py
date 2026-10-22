@@ -194,6 +194,7 @@ bench2dex_task03_dataset = L(load_bench2dex_training_dataset)(
     robot_map_path=os.environ.get("BENCH2DEX_ROBOT_MAP", ""),
     embedding_path=os.environ.get("BENCH2DEX_TASK03_EMBEDDING", ""),
     expected_active_joints=26,
+    chunk_size=16,
 )
 cosmos_predict2_2b_480p_bench2dex_task03 = copy.deepcopy(cosmos_predict2_2b_480p_libero)
 cosmos_predict2_2b_480p_bench2dex_task03["model"]["config"].update(

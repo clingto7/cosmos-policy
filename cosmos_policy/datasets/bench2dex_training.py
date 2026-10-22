@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from cosmos_policy.datasets.bench2dex_audit import TaskStatistics, load_profile
-from cosmos_policy.datasets.bench2dex_dataset import Bench2DexDataset
+from cosmos_policy.datasets.bench2dex_dataset import CHUNK_SIZE, Bench2DexDataset
 
 
 def load_bench2dex_training_dataset(
@@ -20,8 +20,11 @@ def load_bench2dex_training_dataset(
     robot_map_path: str,
     embedding_path: str,
     expected_active_joints: int = 26,
+    chunk_size: int = CHUNK_SIZE,
 ) -> Bench2DexDataset:
     """Require the matched audit and the embedding of its full scene prompt."""
+    if chunk_size != CHUNK_SIZE:
+        raise ValueError(f"task03 action chunk must be {CHUNK_SIZE}")
     if not all((manifest_path, robot_map_path, embedding_path)):
         raise ValueError("BENCH2DEX_TASK03_MANIFEST, BENCH2DEX_ROBOT_MAP, and BENCH2DEX_TASK03_EMBEDDING are required")
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))

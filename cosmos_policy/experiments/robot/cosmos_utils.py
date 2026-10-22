@@ -922,6 +922,17 @@ def get_action(
             WRIST_IMAGE_IDX = 0
             WRIST_IMAGE2_IDX = 1
             IMAGE_IDX = 2
+        elif cfg.suite == "bench2dex":
+            all_camera_images = [
+                obs["left_wrist_image"],
+                obs["right_wrist_image"],
+                obs["primary_image"],
+                obs["secondary_image"],
+            ]
+            WRIST_IMAGE_IDX = 0
+            WRIST_IMAGE2_IDX = 1
+            IMAGE_IDX = 2
+            IMAGE2_IDX = 3
         else:
             raise ValueError(f"Eval suite not implemented yet: {cfg.suite}")
 
@@ -1162,6 +1173,8 @@ def get_action(
                     5,
                     6,
                 ]  # 0: blank, 1: curr proprio, 2: curr left wrist img, 3: curr right wrist img, 4: curr primary img, 5: action, 6: future proprio, 7: future left wrist img, 8: future right wrist img, 9: future primary img, 10: value
+            elif cfg.suite == "bench2dex":
+                INDICES_TO_REPLACE = [0, 1, 6, 7]
             else:
                 raise ValueError(f"Eval suite not implemented yet: {cfg.suite}")
             future_image_predictions = get_future_images_from_generated_samples(

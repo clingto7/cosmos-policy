@@ -23,6 +23,7 @@ from cosmos_policy._src.imaginaire.lazy_config import LazyCall as L
 from cosmos_policy._src.imaginaire.lazy_config import LazyDict
 from cosmos_policy._src.imaginaire.utils import log
 from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path  # noqa: F401
+from cosmos_policy.bench2dex_proof import FiniteTrainingStep
 from cosmos_policy.datasets.aloha_dataset import ALOHADataset
 from cosmos_policy.datasets.bench2dex_training import load_bench2dex_training_dataset
 from cosmos_policy.datasets.libero_dataset import LIBERODataset
@@ -217,10 +218,14 @@ cosmos_predict2_2b_480p_bench2dex_task03["dataloader_train"] = L(DataLoader)(
     batch_size=1,
     drop_last=True,
 )
-cosmos_predict2_2b_480p_bench2dex_task03["trainer"].update(max_iter=4, run_validation=False)
+cosmos_predict2_2b_480p_bench2dex_task03["trainer"].update(
+    max_iter=4,
+    run_validation=False,
+    callbacks={"bench2dex_finite": L(FiniteTrainingStep)()},
+)
 cosmos_predict2_2b_480p_bench2dex_task03["checkpoint"].update(save_iter=2)
 cosmos_predict2_2b_480p_bench2dex_task03["job"].update(
-    group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03"
+    group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03", wandb_mode="disabled"
 )
 
 # Inference version

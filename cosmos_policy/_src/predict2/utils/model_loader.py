@@ -284,7 +284,12 @@ def load_model_state_dict_from_checkpoint(
                 local_state_dict = mapped_state_dict
 
             # `strict=False` is needed to avoid errors: `Skipping key ... introduced by TransformerEngine for FP8 in the checkpoint.`
-            network_keys = [f"net.{name}" for name, _ in model.net.named_parameters()]
+            model_state_keys = model.state_dict()
+            network_keys = []
+            for name, _ in model.net.named_parameters():
+                named_key = f"net.{name}"
+                unwrapped_key = named_key.replace("._checkpoint_wrapped_module", "")
+                network_keys.append(unwrapped_key if unwrapped_key in model_state_keys else named_key)
             missing = [key for key in network_keys if key not in local_state_dict]
             if require_pretrained_match and checkpoint_format == "pt" and (not network_keys or missing):
                 raise ValueError(

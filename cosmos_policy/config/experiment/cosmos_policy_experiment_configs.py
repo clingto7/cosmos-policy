@@ -449,7 +449,10 @@ cosmos_predict2_2b_480p_aloha_185_demos_4_tasks_mixture_foldshirt15_candiesinbow
         checkpoint=dict(
             # Resume from 50K checkpoint of base Cosmos Policy run
             load_path=get_checkpoint_path(
-                "hf://nvidia/Cosmos-Policy-ALOHA-Predict2-2B/Cosmos-Policy-ALOHA-Predict2-2B.pt"
+                os.environ.get(
+                    "COSMOS_POLICY_ALOHA_CHECKPOINT",
+                    "hf://nvidia/Cosmos-Policy-ALOHA-Predict2-2B/Cosmos-Policy-ALOHA-Predict2-2B.pt",
+                )
             ),
         ),
         scheduler=dict(

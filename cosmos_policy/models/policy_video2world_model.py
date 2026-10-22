@@ -379,7 +379,11 @@ class CosmosPolicyVideo2WorldModel(CosmosPolicyDiffusionModel):
         # Manually add in value to the condition.gt_frames as well
         # (This is actually not needed for training because the value is not used as conditioning, but it may be useful
         # for visualizations when decoding the ground-truth latents to images)
-        if torch.all(data_batch["value_latent_idx"] != -1) and "value_function_return" in data_batch:
+        if (
+            not self.config.mask_value_prediction_loss_for_policy_prediction
+            and torch.all(data_batch["value_latent_idx"] != -1)
+            and "value_function_return" in data_batch
+        ):
             batch_indices = torch.arange(condition.gt_frames.shape[0], device=condition.gt_frames.device)
             _, C_latent, _, H_latent, W_latent = condition.gt_frames.shape
             condition.gt_frames[batch_indices, :, data_batch["value_latent_idx"], :, :] = (

@@ -23,6 +23,7 @@ from cosmos_policy._src.imaginaire.lazy_config import LazyDict
 from cosmos_policy._src.imaginaire.utils import log
 from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path  # noqa: F401
 from cosmos_policy.datasets.aloha_dataset import ALOHADataset
+from cosmos_policy.datasets.bench2dex_training import load_bench2dex_training_dataset
 from cosmos_policy.datasets.libero_dataset import LIBERODataset
 from cosmos_policy.datasets.robocasa_dataset import RoboCasaDataset
 from cosmos_policy.models.policy_video2world_model import CosmosPolicyVideo2WorldModel
@@ -179,6 +180,47 @@ cosmos_predict2_2b_480p_libero = LazyDict(
         upload_reproducible_setup=False,
     )
 )
+# Task 03 uses the 100-demo audit from issue 3. The dataset loader validates
+# the active-joint count, matching statistics, and full-prompt T5 embedding.
+bench2dex_task03_dataset = L(load_bench2dex_training_dataset)(
+    manifest_path=os.environ.get("BENCH2DEX_TASK03_MANIFEST", ""),
+    robot_map_path=os.environ.get("BENCH2DEX_ROBOT_MAP", ""),
+    embedding_path=os.environ.get("BENCH2DEX_TASK03_EMBEDDING", ""),
+    expected_active_joints=26,
+)
+cosmos_predict2_2b_480p_bench2dex_task03 = LazyDict(
+    dict(
+        defaults=["/experiment/cosmos_predict2_2b_480p_libero", "_self_"],
+        model=L(CosmosPolicyVideo2WorldModel)(
+            config=dict(
+                state_t=13,
+                min_num_conditional_frames=6,
+                max_num_conditional_frames=6,
+                tokenizer=dict(chunk_duration=49),
+                mask_value_prediction_loss_for_policy_prediction=True,
+            ),
+        ),
+        dataloader_train=L(DataLoader)(
+            num_workers=4,
+            persistent_workers=True,
+            pin_memory=True,
+            dataset=bench2dex_task03_dataset,
+            sampler=L(DistributedSampler)(
+                dataset=bench2dex_task03_dataset,
+                num_replicas=L(parallel_state.get_data_parallel_world_size)(),
+                rank=L(parallel_state.get_data_parallel_rank)(),
+                shuffle=True,
+                seed=0,
+            ),
+            batch_size=1,
+            drop_last=True,
+        ),
+        trainer=dict(max_iter=4, run_validation=False),
+        checkpoint=dict(save_iter=2),
+        job=dict(group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03"),
+    )
+)
+
 # Inference version
 cosmos_predict2_2b_480p_libero__inference_only = LazyDict(
     dict(
@@ -469,6 +511,7 @@ def register_configs():
         # LIBERO
         cosmos_predict2_2b_480p_libero,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_libero__inference_only,
+        cosmos_predict2_2b_480p_bench2dex_task03,
         # RoboCasa
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task__inference,

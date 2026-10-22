@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ from cosmos_policy.datasets.bench2dex_dataset import (
     execute_stub_policy,
     inspect_episode,
 )
+from cosmos_policy.datasets.bench2dex_training import load_bench2dex_training_dataset
 
 
 PROFILE = RobotProfile(
@@ -68,6 +70,39 @@ def write_episode(path: Path, *, homing: int = 18) -> None:
 
 
 class Bench2DexContractTest(unittest.TestCase):
+    def test_matched_audit_and_full_prompt_embedding_enter_training(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            source = directory / "source"
+            source.mkdir()
+            template = directory / "template.hdf5"
+            write_episode(template)
+            for index in range(100):
+                (source / f"episode_{index:06d}.hdf5").hardlink_to(template)
+            manifest, _ = audit_task(source, source, PROFILE, DESCRIPTION)
+            manifest_path = directory / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            robot_map = directory / "robots.yml"
+            robot_map.write_text(
+                "robots:\n  test_robot:\n    full_joint_names: [mimic, joint_b, joint_a]\n"
+                "    active_joint_names: [joint_a, joint_b]\n",
+                encoding="utf-8",
+            )
+            embedding_path = directory / "embedding.npz"
+            np.savez(embedding_path, prompt=DESCRIPTION, embedding=np.ones((512, 1024), dtype=np.float32))
+            dataset = load_bench2dex_training_dataset(
+                str(manifest_path), str(robot_map), str(embedding_path), expected_active_joints=2
+            )
+            sample = dataset[0]
+            self.assertEqual(sample["camera_order"], CAMERAS)
+            self.assertEqual(sample["t5_text_embeddings"].shape, (512, 1024))
+            self.assertEqual(sample["value_function_sample_mask"], 0)
+            np.savez(embedding_path, prompt="Different text", embedding=np.ones((512, 1024), dtype=np.float32))
+            with self.assertRaisesRegex(ValueError, "audited full task description"):
+                load_bench2dex_training_dataset(
+                    str(manifest_path), str(robot_map), str(embedding_path), expected_active_joints=2
+                )
+
     def test_runtime_mimic_rules_keep_training_active_joint_order(self) -> None:
         bare = RobotProfile("test_robot", PROFILE.full_joint_names, PROFILE.active_joint_names)
         runtime_info = SimpleNamespace(

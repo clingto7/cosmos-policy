@@ -13,10 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import importlib
 import os
 from typing import Optional
 
+import attrs
 import torch
 from peft import LoraConfig, set_peft_model_state_dict
 
@@ -199,6 +201,7 @@ def load_model_state_dict_from_checkpoint(
     load_ema_to_reg=False,
     local_cache_dir=None,
     override_cache: bool = False,
+    require_pretrained_match: bool = False,
 ):
     if s3_checkpoint_dir is not None:
         s3_checkpoint_dir = str(s3_checkpoint_dir)
@@ -226,6 +229,8 @@ def load_model_state_dict_from_checkpoint(
         if distributed.is_rank0():
             log.info(f"Loading model cached locally from {local_s3_ckpt_fp}")
             local_state_dict = easy_io.load(local_s3_ckpt_fp, weights_only=INTERNAL)
+            if checkpoint_format == "pt":
+                local_state_dict = local_state_dict.get("model", local_state_dict.get("state_dict", local_state_dict))
 
             # Handle LoRA key mapping if the model uses LoRA and checkpoint is in .pt format
             if (
@@ -267,7 +272,21 @@ def load_model_state_dict_from_checkpoint(
                 local_state_dict = mapped_state_dict
 
             # `strict=False` is needed to avoid errors: `Skipping key ... introduced by TransformerEngine for FP8 in the checkpoint.`
+            network_keys = [f"net.{name}" for name, _ in model.net.named_parameters()]
+            missing = [key for key in network_keys if key not in local_state_dict]
+            if require_pretrained_match and checkpoint_format == "pt" and (not network_keys or missing):
+                raise ValueError(
+                    f"Consolidated checkpoint is missing {len(missing)}/{len(network_keys)} network parameters "
+                    f"({missing[:3]}): {local_s3_ckpt_fp}"
+                )
             model.load_state_dict(local_state_dict, strict=False)
+            if require_pretrained_match:
+                for key in network_keys[:3]:
+                    actual = model.state_dict()[key]
+                    expected = local_state_dict[key].to(device=actual.device, dtype=actual.dtype)
+                    if not torch.equal(actual, expected):
+                        raise ValueError(f"Consolidated checkpoint parameter did not load: {key}")
+                log.info(f"Verified {len(network_keys)} network parameters from {local_s3_ckpt_fp}")
 
         # Synchronize model states from rank 0 to all other ranks
         # Skip EMA parameters and buffers to avoid OOM - they are on CPU now, and will be moved to CUDA and synced via copy from main model after FSDP
@@ -368,18 +387,19 @@ def create_model_from_consolidated_checkpoint_with_fsdp(config: Config) -> Imagi
     """
     # To avoid DTensor issues, load the model from a consolidated checkpoint in Tensor format before applying FSDP.
     fsdp_shard_size = config.model.config.fsdp_shard_size
-    config.model.config.fsdp_shard_size = 1  # Set to 1 to disable FSDP during model instantiation.
-    model = instantiate(config.model).cuda()
+    model_config = copy.deepcopy(config.model)
+    model_config.config = attrs.evolve(model_config.config, fsdp_shard_size=1)
+    model = instantiate(model_config).cuda()
     # DCP checkpointer does not support loading from a consolidated checkpoint, so we support it here.
     model = load_model_state_dict_from_checkpoint(
         model=model,
         config=config,
         s3_checkpoint_dir=config.checkpoint.load_path,
         load_ema_to_reg=config.checkpoint.load_ema_to_reg,
+        require_pretrained_match=config.job.name == "cosmos_predict2_2b_480p_bench2dex_task03",
     )
     # If FSDP is enabled, apply FSDP to the model.
     if fsdp_shard_size > 1:
-        config.model.config.fsdp_shard_size = fsdp_shard_size
         fsdp_device_mesh = hsdp_device_mesh(
             sharding_group_size=fsdp_shard_size,
         )

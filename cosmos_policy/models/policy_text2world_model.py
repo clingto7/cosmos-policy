@@ -398,9 +398,14 @@ class CosmosPolicyDiffusionModel(BaseDiffusionModel):
                 proprio_indices=future_proprio_indices,
             )
         # Value
-        x0_B_C_T_H_W[batch_indices, :, value_indices, :, :] = (
-            value_function_return.reshape(-1, 1, 1, 1).expand(-1, C_latent, H_latent, W_latent).to(x0_B_C_T_H_W.dtype)
-        )
+        # Demonstrations have no return target. Keep the unsupervised slot
+        # independent of the dataset placeholder, including in denoiser input.
+        if self.config.mask_value_prediction_loss_for_policy_prediction:
+            x0_B_C_T_H_W[batch_indices, :, value_indices, :, :] = 0
+        else:
+            x0_B_C_T_H_W[batch_indices, :, value_indices, :, :] = (
+                value_function_return.reshape(-1, 1, 1, 1).expand(-1, C_latent, H_latent, W_latent).to(x0_B_C_T_H_W.dtype)
+            )
 
         # Get the mean and stand deviation of the marginal probability distribution.
         mean_B_C_T_H_W, std_B_T = self.sde.marginal_prob(x0_B_C_T_H_W, sigma_B_T)
@@ -554,6 +559,7 @@ class CosmosPolicyDiffusionModel(BaseDiffusionModel):
         # Apply the loss mask to the loss
         if (
             self.config.mask_loss_for_action_future_state_prediction
+            or self.config.mask_value_prediction_loss_for_policy_prediction
             or self.config.mask_current_state_action_for_value_prediction
             or self.config.mask_future_state_for_qvalue_prediction
             or self.config.action_loss_multiplier != 1

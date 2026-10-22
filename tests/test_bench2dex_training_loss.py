@@ -2,8 +2,10 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
+from cosmos_policy.bench2dex_proof import FiniteTrainingStep
 from cosmos_policy.models.policy_text2world_model import CosmosPolicyDiffusionModel
 
 
@@ -62,3 +64,18 @@ def test_demo_loss_uses_four_future_views_and_ignores_value_placeholder() -> Non
     assert torch.count_nonzero(baseline[:, :, 12]) == 0
     baseline.mean().backward()
     assert weight.grad is not None and torch.isfinite(weight.grad)
+
+
+def test_task03_runtime_check_rejects_nonfinite_loss_and_gradients() -> None:
+    check = FiniteTrainingStep()
+    model = torch.nn.Linear(2, 1)
+    model.weight.grad = torch.tensor([[1.0, 2.0]])
+    check.on_before_backward(model, torch.tensor(1.0))
+    check.on_after_backward(model)
+
+    with torch.no_grad():
+        model.weight.grad[0, 1] = float("nan")
+    with pytest.raises(FloatingPointError, match="gradients"):
+        check.on_after_backward(model)
+    with pytest.raises(FloatingPointError, match="loss"):
+        check.on_before_backward(model, torch.tensor(float("inf")))

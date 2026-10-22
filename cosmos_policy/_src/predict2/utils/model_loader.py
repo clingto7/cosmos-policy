@@ -233,6 +233,17 @@ def load_model_state_dict_from_checkpoint(
             if checkpoint_format == "pt":
                 local_state_dict = local_state_dict.get("model", local_state_dict.get("state_dict", local_state_dict))
 
+                # Activation checkpointing wraps transformer blocks after the
+                # consolidated weights were saved. Restore their original names.
+                remapped = 0
+                for model_key in model.state_dict():
+                    checkpoint_key = model_key.replace("._checkpoint_wrapped_module", "")
+                    if model_key not in local_state_dict and checkpoint_key in local_state_dict:
+                        local_state_dict[model_key] = local_state_dict[checkpoint_key]
+                        remapped += 1
+                if remapped:
+                    log.info(f"Mapped {remapped} activation-checkpointed parameters and buffers")
+
             # Handle LoRA key mapping if the model uses LoRA and checkpoint is in .pt format
             if (
                 hasattr(model, "config")

@@ -12,6 +12,7 @@
 # dir@exchange.nvidia.com.
 # -----------------------------------------------------------------------------
 
+import copy
 import os
 
 from hydra.core.config_store import ConfigStore
@@ -193,37 +194,33 @@ bench2dex_task03_dataset = L(load_bench2dex_training_dataset)(
     embedding_path=os.environ.get("BENCH2DEX_TASK03_EMBEDDING", ""),
     expected_active_joints=26,
 )
-cosmos_predict2_2b_480p_bench2dex_task03 = LazyDict(
-    dict(
-        defaults=["/experiment/cosmos_predict2_2b_480p_libero", "_self_"],
-        model=L(CosmosPolicyVideo2WorldModel)(
-            config=dict(
-                state_t=13,
-                min_num_conditional_frames=6,
-                max_num_conditional_frames=6,
-                tokenizer=dict(chunk_duration=49),
-                mask_value_prediction_loss_for_policy_prediction=True,
-            ),
-        ),
-        dataloader_train=L(DataLoader)(
-            num_workers=4,
-            persistent_workers=True,
-            pin_memory=True,
-            dataset=bench2dex_task03_dataset,
-            sampler=L(DistributedSampler)(
-                dataset=bench2dex_task03_dataset,
-                num_replicas=L(parallel_state.get_data_parallel_world_size)(),
-                rank=L(parallel_state.get_data_parallel_rank)(),
-                shuffle=True,
-                seed=0,
-            ),
-            batch_size=1,
-            drop_last=True,
-        ),
-        trainer=dict(max_iter=4, run_validation=False),
-        checkpoint=dict(save_iter=2),
-        job=dict(group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03"),
-    )
+cosmos_predict2_2b_480p_bench2dex_task03 = copy.deepcopy(cosmos_predict2_2b_480p_libero)
+cosmos_predict2_2b_480p_bench2dex_task03["model"]["config"].update(
+    state_t=13,
+    min_num_conditional_frames=6,
+    max_num_conditional_frames=6,
+    tokenizer=dict(chunk_duration=49),
+    mask_value_prediction_loss_for_policy_prediction=True,
+)
+cosmos_predict2_2b_480p_bench2dex_task03["dataloader_train"] = L(DataLoader)(
+    num_workers=4,
+    persistent_workers=True,
+    pin_memory=True,
+    dataset=bench2dex_task03_dataset,
+    sampler=L(DistributedSampler)(
+        dataset=bench2dex_task03_dataset,
+        num_replicas=L(parallel_state.get_data_parallel_world_size)(),
+        rank=L(parallel_state.get_data_parallel_rank)(),
+        shuffle=True,
+        seed=0,
+    ),
+    batch_size=1,
+    drop_last=True,
+)
+cosmos_predict2_2b_480p_bench2dex_task03["trainer"].update(max_iter=4, run_validation=False)
+cosmos_predict2_2b_480p_bench2dex_task03["checkpoint"].update(save_iter=2)
+cosmos_predict2_2b_480p_bench2dex_task03["job"].update(
+    group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03"
 )
 
 # Inference version

@@ -11,7 +11,7 @@ import h5py
 import numpy as np
 import cv2
 
-from cosmos_policy.datasets.bench2dex_audit import audit_task
+from cosmos_policy.datasets.bench2dex_audit import audit_task, load_sha256sum, sha256_file
 from cosmos_policy.datasets.bench2dex_dataset import (
     CAMERAS,
     Bench2DexDataset,
@@ -237,6 +237,23 @@ class Bench2DexContractTest(unittest.TestCase):
             self.assertEqual(candidate["matched_count"], 0)
             self.assertEqual(candidate["entries"][0]["identity"], "not_checked")
             self.assertIsNotNone(candidate_stats)
+
+            checksum_file = Path(root) / "yk.sha256"
+            checksum_file.write_text(
+                "".join(f"{sha256_file(path)}  {path.name}\n" for path in sorted(reference.glob("episode_*.hdf5")))
+            )
+            remote, remote_stats = audit_task(
+                source,
+                None,
+                PROFILE,
+                DESCRIPTION,
+                yk_hashes=load_sha256sum(checksum_file),
+                yk_location="host:/yk/task03",
+            )
+            self.assertTrue(remote["ready"])
+            self.assertEqual(remote["yk_reference_kind"], "remote_sha256sum")
+            self.assertEqual(remote["entries"][0]["yk_source"], "host:/yk/task03/episode_000000.hdf5")
+            self.assertIsNotNone(remote_stats)
 
             drifted = reference / "episode_000099.hdf5"
             drifted.unlink()

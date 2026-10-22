@@ -11,6 +11,10 @@ Example::
       --scene /Bench2Dex/scenes/03_wine_glass_plate_balance.yaml \
       --robot-map /Bench2Dex/robots/active_dof_maps.yml \
       --manifest-output /work/task03-manifest.json
+
+Use ``--yk-sha256`` and ``--yk-location`` instead of ``--yk-dir`` when the
+reference directory is on a separate host. Capture hashes there with
+``sha256sum episode_*.hdf5`` and keep the unmodified output as evidence.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,6 +145,19 @@ def _episodes(directory: Path) -> list[Path]:
     return sorted(directory.glob("episode_*.hdf5"))
 
 
+def load_sha256sum(path: str | Path) -> dict[str, str]:
+    """Read a GNU sha256sum list captured from the yk training directory."""
+    hashes: dict[str, str] = {}
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        match = re.fullmatch(r"([0-9a-f]{64})  (episode_[^/]+\.hdf5)", line)
+        if match is None or match[2] in hashes:
+            raise ValueError(f"invalid or duplicate sha256sum entry at line {number}")
+        hashes[match[2]] = match[1]
+    if not hashes:
+        raise ValueError("empty yk sha256sum file")
+    return hashes
+
+
 def audit_task(
     task_dir: str | Path,
     yk_dir: str | Path | None,
@@ -147,8 +165,12 @@ def audit_task(
     task_description: str,
     *,
     expected_count: int = 100,
+    yk_hashes: dict[str, str] | None = None,
+    yk_location: str | None = None,
 ) -> tuple[dict, TaskStatistics | None]:
-    """Audit candidate data; require a separate yk directory for full readiness."""
+    """Audit data against yk files or a checksum list captured on its host."""
+    if yk_dir is not None and yk_hashes is not None:
+        raise ValueError("provide either yk_dir or yk_hashes")
     source_paths = _episodes(Path(task_dir))
     reference_paths = _episodes(Path(yk_dir)) if yk_dir is not None else []
     digest_cache: dict[Path, str] = {}
@@ -159,24 +181,37 @@ def audit_task(
             digest_cache[resolved] = sha256_file(path)
         return digest_cache[resolved]
 
-    reference_by_hash: dict[str, list[Path]] = defaultdict(list)
+    reference_by_hash: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for path in reference_paths:
-        reference_by_hash[digest(path)].append(path)
+        reference_by_hash[digest(path)].append((path.name, str(path.resolve())))
+    if yk_hashes is not None:
+        for name, file_hash in yk_hashes.items():
+            if not re.fullmatch(r"episode_[^/]+\.hdf5", name) or not re.fullmatch(r"[0-9a-f]{64}", file_hash):
+                raise ValueError(f"invalid yk checksum record: {name}")
+            location = f"{yk_location.rstrip('/')}/{name}" if yk_location else name
+            reference_by_hash[file_hash].append((name, location))
+    has_reference = yk_dir is not None or yk_hashes is not None
+    reference_count = len(reference_paths) if yk_dir is not None else len(yk_hashes or {})
 
     entries: list[dict] = []
     valid_infos: list[EpisodeInfo] = []
     for path in source_paths:
         file_hash = digest(path)
         references = reference_by_hash[file_hash]
-        reference = references.pop(0) if references else None
+        exact = next((index for index, (name, _) in enumerate(references) if name == path.name), None)
+        reference = references.pop(exact if exact is not None else 0) if references else None
         if reference:
-            identity = "same_path" if path.resolve() == reference.resolve() else "same_sha256"
+            reference_name, reference_source = reference
+            if str(path.resolve()) == reference_source:
+                identity = "same_path"
+            else:
+                identity = "same_sha256" if path.name == reference_name else "renamed_sha256"
         else:
-            identity = "unmatched" if yk_dir is not None else "not_checked"
+            identity = "unmatched" if has_reference else "not_checked"
         entry = {
             "source": str(path.resolve()),
             "sha256": file_hash,
-            "yk_source": str(reference.resolve()) if reference else None,
+            "yk_source": reference[1] if reference else None,
             "identity": identity,
         }
         try:
@@ -222,16 +257,20 @@ def audit_task(
         entry.setdefault("prompt_matches_embedded", None)
         entries.append(entry)
 
-    unmatched_yk = [str(path.resolve()) for paths in reference_by_hash.values() for path in paths]
+    unmatched_yk = [source for records in reference_by_hash.values() for _, source in records]
     source_valid = len(source_paths) == expected_count and all(entry["exclusion_reason"] is None for entry in entries)
     ready = (
-        yk_dir is not None
+        has_reference
         and source_valid
-        and len(reference_paths) == expected_count
+        and reference_count == expected_count
         and not unmatched_yk
-        and all(entry["identity"] in ("same_path", "same_sha256") for entry in entries)
+        and all(entry["identity"] in ("same_path", "same_sha256", "renamed_sha256") for entry in entries)
     )
     statistics = compute_statistics(valid_infos, profile) if source_valid else None
+    reference_kind = "local_directory" if yk_dir is not None else "remote_sha256sum" if yk_hashes is not None else None
+    reference_location = (
+        str(Path(yk_dir).resolve()) if yk_dir is not None else yk_location if yk_hashes is not None else None
+    )
     manifest = {
         "task_description": task_description,
         "prompt_source": "scene.description",
@@ -239,8 +278,10 @@ def audit_task(
         "active_joint_names": list(profile.active_joint_names),
         "expected_count": expected_count,
         "source_count": len(source_paths),
-        "yk_count": len(reference_paths),
-        "matched_count": sum(entry["identity"] in ("same_path", "same_sha256") for entry in entries),
+        "yk_count": reference_count,
+        "yk_reference_kind": reference_kind,
+        "yk_location": reference_location,
+        "matched_count": sum(entry["identity"] in ("same_path", "same_sha256", "renamed_sha256") for entry in entries),
         "source_valid": source_valid,
         "ready": ready,
         "entries": entries,
@@ -253,7 +294,10 @@ def audit_task(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-dir", required=True, type=Path)
-    parser.add_argument("--yk-dir", type=Path)
+    yk = parser.add_mutually_exclusive_group()
+    yk.add_argument("--yk-dir", type=Path)
+    yk.add_argument("--yk-sha256", type=Path)
+    parser.add_argument("--yk-location")
     parser.add_argument("--scene", required=True, type=Path)
     parser.add_argument("--robot-map", required=True, type=Path)
     parser.add_argument("--robot-key", default="multi_xarm7_with_ability")
@@ -261,7 +305,15 @@ def main() -> int:
     args = parser.parse_args()
     profile = load_profile(args.robot_map, args.robot_key)
     description = load_task_description(args.scene)
-    manifest, statistics = audit_task(args.task_dir, args.yk_dir, profile, description)
+    if args.yk_sha256 and not args.yk_location:
+        parser.error("--yk-location is required with --yk-sha256")
+    yk_hashes = load_sha256sum(args.yk_sha256) if args.yk_sha256 else None
+    manifest, statistics = audit_task(
+        args.task_dir, args.yk_dir, profile, description, yk_hashes=yk_hashes, yk_location=args.yk_location
+    )
+    if args.yk_sha256:
+        manifest["yk_checksum_file"] = str(args.yk_sha256.resolve())
+        manifest["yk_checksum_file_sha256"] = sha256_file(args.yk_sha256)
     if statistics is not None:
         # Confirm that the same full prompt and four-camera contract reach the
         # training sample, with no extra demonstration holdout.

@@ -20,6 +20,7 @@ from typing import Optional
 
 import attrs
 import torch
+from omegaconf import OmegaConf
 from peft import LoraConfig, set_peft_model_state_dict
 
 from cosmos_policy._src.imaginaire.config import Config
@@ -388,7 +389,12 @@ def create_model_from_consolidated_checkpoint_with_fsdp(config: Config) -> Imagi
     # To avoid DTensor issues, load the model from a consolidated checkpoint in Tensor format before applying FSDP.
     fsdp_shard_size = config.model.config.fsdp_shard_size
     model_config = copy.deepcopy(config.model)
-    model_config.config = attrs.evolve(model_config.config, fsdp_shard_size=1)
+    if fsdp_shard_size > 1:
+        if OmegaConf.is_config(model_config):
+            OmegaConf.set_readonly(model_config, False)
+            model_config.config.fsdp_shard_size = 1
+        else:
+            model_config.config = attrs.evolve(model_config.config, fsdp_shard_size=1)
     model = instantiate(model_config).cuda()
     # DCP checkpointer does not support loading from a consolidated checkpoint, so we support it here.
     model = load_model_state_dict_from_checkpoint(

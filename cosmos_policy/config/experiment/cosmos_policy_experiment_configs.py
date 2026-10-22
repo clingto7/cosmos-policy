@@ -146,7 +146,12 @@ cosmos_predict2_2b_480p_libero = LazyDict(
             context_parallel_size=1,
         ),
         checkpoint=dict(
-            load_path=get_checkpoint_path("hf://nvidia/Cosmos-Predict2-2B-Video2World/model-480p-16fps.pt"),
+            load_path=get_checkpoint_path(
+                os.environ.get(
+                    "COSMOS_POLICY_PRETRAINED_CHECKPOINT",
+                    "hf://nvidia/Cosmos-Predict2-2B-Video2World/model-480p-16fps.pt",
+                )
+            ),
             load_training_state=False,  # This means do not load train state from the base checkpoint above (load_path); but when resuming this job, will load train state
             strict_resume=False,
             save_iter=1000,

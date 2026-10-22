@@ -48,14 +48,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Encode the audited full task prompt for Cosmos training")
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--text-model", default="google-t5/t5-11b")
+    parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     if not manifest.get("ready"):
         raise ValueError("prompt embedding requires a ready audit")
-    from cosmos_policy._src.predict2.inference.get_t5_emb import get_text_embedding
+    from cosmos_policy._src.predict2.inference.get_t5_emb import CosmosT5TextEncoder, get_text_embedding
 
     prompt = manifest["task_description"]
-    embedding = get_text_embedding(prompt).squeeze(0).float().cpu().numpy()
+    encoder = CosmosT5TextEncoder(model_name=args.text_model, device=args.device)
+    embedding = get_text_embedding(prompt, encoder=encoder, device=args.device).squeeze(0).float().cpu().numpy()
     if embedding.ndim != 2 or not np.isfinite(embedding).all():
         raise ValueError("text encoder returned an invalid embedding")
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)

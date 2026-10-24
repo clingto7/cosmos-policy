@@ -24,7 +24,9 @@ from cosmos_policy.datasets.bench2dex_dataset import CAMERAS, CHUNK_SIZE, RobotP
 
 logger = logging.getLogger("bench2dex_runtime")
 MAX_MESSAGE_BYTES = 64 * 1024 * 1024
-REQUEST_TIMEOUT_SECONDS = 30.0
+# Isaac Sim may spend over a minute initializing a scene after connecting to
+# the policy server. Keep the RPC socket open through that startup window.
+REQUEST_TIMEOUT_SECONDS = 300.0
 
 
 def _decode_observation(payload: dict[str, Any], expected_prompt: str, profile: RobotProfile, statistics: TaskStatistics):

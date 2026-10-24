@@ -221,8 +221,9 @@ def load_model_state_dict_from_checkpoint(
 
     from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path
 
-    # Consolidated checkpoints are deserialized on rank 0. DCP checkpoints
-    # are shard directories and must use DistributedCheckpointer locally too.
+    # Consolidated checkpoints can be deserialized directly on rank 0, but a
+    # DCP checkpoint is a directory of shards and must go through the
+    # DistributedCheckpointer even when it already exists on the local disk.
     load_from_local = checkpoint_format == "pt"
     local_s3_ckpt_fp = get_checkpoint_path(cur_key_ckpt_full_path)
 

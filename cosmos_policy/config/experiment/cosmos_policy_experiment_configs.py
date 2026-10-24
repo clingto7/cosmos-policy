@@ -221,7 +221,6 @@ cosmos_predict2_2b_480p_bench2dex_task["model"]["config"].update(
     min_num_conditional_frames=6,
     max_num_conditional_frames=6,
     tokenizer=dict(chunk_duration=49),
-    action_dim=BENCH2DEX_ACTIVE_JOINTS,
     net=dict(action_dim=BENCH2DEX_ACTIVE_JOINTS),
     mask_value_prediction_loss_for_policy_prediction=True,
 )

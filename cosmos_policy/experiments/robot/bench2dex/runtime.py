@@ -66,7 +66,7 @@ def _decode_observation(payload: dict[str, Any], expected_prompt: str, profile: 
 
 
 class Bench2DexPolicyAdapter:
-    """Validate observations, query Cosmos once, and expand 16 absolute targets."""
+    """Validate observations, query Cosmos once, and expand one absolute action chunk."""
 
     def __init__(
         self,
@@ -79,11 +79,11 @@ class Bench2DexPolicyAdapter:
         seed: int = 0,
     ) -> None:
         if statistics.robot_key != profile.robot_key or statistics.active_joint_names != profile.active_joint_names:
-            raise ValueError("statistics do not match the task03 robot profile")
+            raise ValueError("statistics do not match the robot profile")
         if not task_description.strip():
             raise ValueError("the full task description is required")
-        if CHUNK_SIZE != 16 or len(profile.active_joint_names) != 26:
-            raise ValueError("task03 runtime requires 16 actions across 26 active joints")
+        if CHUNK_SIZE != 16 or not profile.active_joint_names:
+            raise ValueError("Bench2Dex runtime requires a 16-step chunk and at least one active joint")
         if len(set(runtime_joint_names)) != len(runtime_joint_names) or set(runtime_joint_names) != set(
             profile.full_joint_names
         ):
@@ -276,12 +276,17 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
         config_file=args.config_file,
     )
     model, cosmos_config = get_model(cfg)
-    expected_chunk = cosmos_config.dataloader_train.dataset.chunk_size
+    dataset_config = cosmos_config.dataloader_train.dataset
+    expected_chunk = getattr(dataset_config, "chunk_size", None)
+    if expected_chunk is None and hasattr(dataset_config, "get"):
+        expected_chunk = dataset_config.get("chunk_size", CHUNK_SIZE)
+    if expected_chunk is None:
+        expected_chunk = CHUNK_SIZE
     if expected_chunk != CHUNK_SIZE:
-        raise ValueError(f"checkpoint expects action chunk {expected_chunk}, task03 requires {CHUNK_SIZE}")
+        raise ValueError(f"checkpoint expects action chunk {expected_chunk}, Bench2Dex requires {CHUNK_SIZE}")
     action_dim = len(profile.active_joint_names)
-    if action_dim != 26 or len(statistics.active_joint_names) != action_dim:
-        raise ValueError("task03 checkpoint statistics must describe 26 active joints")
+    if not action_dim or len(statistics.active_joint_names) != action_dim:
+        raise ValueError("checkpoint statistics must describe the audited active-joint dimensions")
 
     inference_cfg = SimpleNamespace(
         suite="bench2dex",
@@ -295,6 +300,7 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
         num_third_person_images=2,
         use_variance_scale=False,
         chunk_size=CHUNK_SIZE,
+        action_dim=action_dim,
         unnormalize_actions=False,
     )
 
@@ -317,14 +323,25 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
     return predict
 
 
-def _load_inputs(args: argparse.Namespace) -> tuple[RobotProfile, TaskStatistics, str, np.ndarray]:
+def _load_inputs(args: argparse.Namespace) -> tuple[RobotProfile, TaskStatistics, str, np.ndarray, str]:
     import yaml
 
     from cosmos_policy.datasets.bench2dex_audit import load_profile
+    from cosmos_policy.datasets.bench2dex_training import resolve_bench2dex_task_config
 
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
-    if not manifest.get("ready") or manifest.get("matched_count") != 100:
-        raise ValueError("task03 inference requires the ready audit of 100 matched demonstrations")
+    task_config = resolve_bench2dex_task_config(
+        args.manifest,
+        args.robot_map,
+        expected_task_id=args.task_id,
+    )
+    if (
+        not manifest.get("ready")
+        or manifest.get("source_count") != 100
+        or manifest.get("matched_count") != 100
+    ):
+        raise ValueError("Bench2Dex inference requires the ready audit of 100 matched demonstrations")
+    task_id = str(task_config["task_id"])
     profile = load_profile(args.robot_map, manifest["robot_key"])
     map_path = Path(args.robot_map).expanduser().resolve()
     robot_entry = yaml.safe_load(map_path.read_text(encoding="utf-8"))["robots"][profile.robot_key]
@@ -335,24 +352,25 @@ def _load_inputs(args: argparse.Namespace) -> tuple[RobotProfile, TaskStatistics
         urdf_rel = robot_entry.get("urdf_path", "").replace("Bench2Dex/", "", 1)
         profile = profile_with_urdf_mimics(profile, base / urdf_rel, mimic_count)
     statistics = TaskStatistics.from_dict(manifest["statistics"])
-    if profile.active_joint_names != statistics.active_joint_names or len(profile.active_joint_names) != 26:
-        raise ValueError("manifest statistics do not match the 26-joint robot profile")
+    if profile.active_joint_names != statistics.active_joint_names or not profile.active_joint_names:
+        raise ValueError("manifest statistics do not match the audited robot profile")
     with np.load(args.embedding, allow_pickle=False) as saved:
         prompt = str(saved["prompt"])
         embedding = np.asarray(saved["embedding"], dtype=np.float32)
     description = manifest["task_description"]
     if prompt != description or embedding.ndim != 2 or not np.isfinite(embedding).all():
         raise ValueError("text embedding must match the audited full task description")
-    return profile, statistics, description, embedding
+    return profile, statistics, description, embedding, task_id
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Serve a task03 Cosmos policy to Bench2Dex REMOTE evaluation")
+    parser = argparse.ArgumentParser(description="Serve an audited Cosmos policy to Bench2Dex REMOTE evaluation")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--robot-map", required=True)
     parser.add_argument("--embedding", required=True)
-    parser.add_argument("--experiment", default="cosmos_predict2_2b_480p_bench2dex_task03")
+    parser.add_argument("--experiment", help="Defaults to the experiment registered for the audited task ID")
+    parser.add_argument("--task-id", help="Verify this two-digit task ID against the audit manifest")
     parser.add_argument("--config-file", default="cosmos_policy/config/config.py")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9000)
@@ -362,14 +380,21 @@ def main() -> None:
         "--trained-with-image-aug",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Apply the deterministic center crop used during task03 training (default: enabled).",
+        help="Apply the deterministic center crop used during training (default: enabled).",
     )
     parser.add_argument("--checkpoint-id", default="", help="Stable label to record in simulator result metadata.")
     args = parser.parse_args()
 
     if args.denoising_steps <= 0:
         parser.error("--denoising-steps must be positive")
-    profile, statistics, description, embedding = _load_inputs(args)
+    profile, statistics, description, embedding, task_id = _load_inputs(args)
+    args.task_id = task_id
+    args.experiment = args.experiment or f"cosmos_predict2_2b_480p_bench2dex_task{task_id}"
+    os.environ["BENCH2DEX_TASK_ID"] = task_id
+    os.environ["BENCH2DEX_ACTIVE_JOINTS"] = str(len(profile.active_joint_names))
+    os.environ["BENCH2DEX_MANIFEST"] = str(Path(args.manifest).expanduser().resolve())
+    os.environ["BENCH2DEX_ROBOT_MAP"] = str(Path(args.robot_map).expanduser().resolve())
+    os.environ["BENCH2DEX_EMBEDDING"] = str(Path(args.embedding).expanduser().resolve())
     args.task_description = description
     args.checkpoint_id = args.checkpoint_id or str(Path(args.checkpoint).expanduser().resolve())
     predictor = _make_predictor(args, profile, statistics, embedding)
@@ -382,7 +407,8 @@ def main() -> None:
         seed=args.seed,
     )
     logger.info(
-        "Serving Bench2Dex task03: robot=%s, active_joints=%d, full_joints=%d, chunk=%d, checkpoint_id=%s, checkpoint=%s",
+        "Serving Bench2Dex task %s: robot=%s, active_joints=%d, full_joints=%d, chunk=%d, checkpoint_id=%s, checkpoint=%s",
+        task_id,
         profile.robot_key,
         len(profile.active_joint_names),
         len(profile.full_joint_names),

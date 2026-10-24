@@ -25,7 +25,10 @@ from cosmos_policy._src.imaginaire.utils import log
 from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path  # noqa: F401
 from cosmos_policy.bench2dex_proof import FiniteTrainingStep
 from cosmos_policy.datasets.aloha_dataset import ALOHADataset
-from cosmos_policy.datasets.bench2dex_training import load_bench2dex_training_dataset
+from cosmos_policy.datasets.bench2dex_training import (
+    load_bench2dex_training_dataset,
+    resolve_bench2dex_task_config,
+)
 from cosmos_policy.datasets.libero_dataset import LIBERODataset
 from cosmos_policy.datasets.robocasa_dataset import RoboCasaDataset
 from cosmos_policy.models.policy_video2world_model import CosmosPolicyVideo2WorldModel
@@ -38,6 +41,21 @@ val_sampling_size_override = dict(
     video_width=1280,
 )
 BASE_DATASETS_DIR = os.environ.get("BASE_DATASETS_DIR", ".")
+BENCH2DEX_MANIFEST = os.environ.get("BENCH2DEX_MANIFEST", os.environ.get("BENCH2DEX_TASK03_MANIFEST", ""))
+BENCH2DEX_ROBOT_MAP = os.environ.get("BENCH2DEX_ROBOT_MAP", "")
+BENCH2DEX_EMBEDDING = os.environ.get(
+    "BENCH2DEX_EMBEDDING", os.environ.get("BENCH2DEX_TASK03_EMBEDDING", "")
+)
+_expected_task_id = os.environ.get("BENCH2DEX_TASK_ID")
+_expected_active_joints = os.environ.get("BENCH2DEX_ACTIVE_JOINTS")
+BENCH2DEX_TASK_CONFIG = resolve_bench2dex_task_config(
+    BENCH2DEX_MANIFEST,
+    BENCH2DEX_ROBOT_MAP,
+    expected_task_id=_expected_task_id,
+    expected_active_joints=int(_expected_active_joints) if _expected_active_joints is not None else None,
+)
+BENCH2DEX_TASK_ID = str(BENCH2DEX_TASK_CONFIG["task_id"])
+BENCH2DEX_ACTIVE_JOINTS = int(BENCH2DEX_TASK_CONFIG["action_dim"])
 
 
 # *** Main checkpoint ***
@@ -187,30 +205,33 @@ cosmos_predict2_2b_480p_libero = LazyDict(
         upload_reproducible_setup=False,
     )
 )
-# Task 03 uses the 100-demo audit from issue 3. The dataset loader validates
-# the active-joint count, matching statistics, and full-prompt T5 embedding.
-bench2dex_task03_dataset = L(load_bench2dex_training_dataset)(
-    manifest_path=os.environ.get("BENCH2DEX_TASK03_MANIFEST", ""),
-    robot_map_path=os.environ.get("BENCH2DEX_ROBOT_MAP", ""),
-    embedding_path=os.environ.get("BENCH2DEX_TASK03_EMBEDDING", ""),
-    expected_active_joints=26,
+# Bench2Dex tasks share the audited data contract, while robot and task
+# dimensions come from the selected task's environment and manifest.
+bench2dex_task_dataset = L(load_bench2dex_training_dataset)(
+    manifest_path=BENCH2DEX_MANIFEST,
+    robot_map_path=BENCH2DEX_ROBOT_MAP,
+    embedding_path=BENCH2DEX_EMBEDDING,
+    expected_active_joints=BENCH2DEX_ACTIVE_JOINTS,
+    expected_task_id=BENCH2DEX_TASK_ID,
     chunk_size=16,
 )
-cosmos_predict2_2b_480p_bench2dex_task03 = copy.deepcopy(cosmos_predict2_2b_480p_libero)
-cosmos_predict2_2b_480p_bench2dex_task03["model"]["config"].update(
+cosmos_predict2_2b_480p_bench2dex_task = copy.deepcopy(cosmos_predict2_2b_480p_libero)
+cosmos_predict2_2b_480p_bench2dex_task["model"]["config"].update(
     state_t=13,
     min_num_conditional_frames=6,
     max_num_conditional_frames=6,
     tokenizer=dict(chunk_duration=49),
+    action_dim=BENCH2DEX_ACTIVE_JOINTS,
+    net=dict(action_dim=BENCH2DEX_ACTIVE_JOINTS),
     mask_value_prediction_loss_for_policy_prediction=True,
 )
-cosmos_predict2_2b_480p_bench2dex_task03["dataloader_train"] = L(DataLoader)(
+cosmos_predict2_2b_480p_bench2dex_task["dataloader_train"] = L(DataLoader)(
     num_workers=4,
     persistent_workers=True,
     pin_memory=True,
-    dataset=bench2dex_task03_dataset,
+    dataset=bench2dex_task_dataset,
     sampler=L(DistributedSampler)(
-        dataset=bench2dex_task03_dataset,
+        dataset=bench2dex_task_dataset,
         num_replicas=L(parallel_state.get_data_parallel_world_size)(),
         rank=L(parallel_state.get_data_parallel_rank)(),
         shuffle=True,
@@ -219,15 +240,19 @@ cosmos_predict2_2b_480p_bench2dex_task03["dataloader_train"] = L(DataLoader)(
     batch_size=1,
     drop_last=True,
 )
-cosmos_predict2_2b_480p_bench2dex_task03["trainer"].update(
+cosmos_predict2_2b_480p_bench2dex_task["trainer"].update(
     max_iter=4,
     run_validation=False,
     callbacks={"bench2dex_finite": L(FiniteTrainingStep)()},
 )
-cosmos_predict2_2b_480p_bench2dex_task03["checkpoint"].update(save_iter=2)
-cosmos_predict2_2b_480p_bench2dex_task03["job"].update(
-    group="bench2dex", name="cosmos_predict2_2b_480p_bench2dex_task03", wandb_mode="disabled"
+cosmos_predict2_2b_480p_bench2dex_task["checkpoint"].update(save_iter=2)
+cosmos_predict2_2b_480p_bench2dex_task["job"].update(
+    group="bench2dex",
+    name=f"cosmos_predict2_2b_480p_bench2dex_task{BENCH2DEX_TASK_ID}",
+    wandb_mode="disabled",
 )
+# Backwards-compatible Python symbol for existing Task03 launch helpers.
+cosmos_predict2_2b_480p_bench2dex_task03 = cosmos_predict2_2b_480p_bench2dex_task
 
 # Inference version
 cosmos_predict2_2b_480p_libero__inference_only = LazyDict(
@@ -522,7 +547,7 @@ def register_configs():
         # LIBERO
         cosmos_predict2_2b_480p_libero,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_libero__inference_only,
-        cosmos_predict2_2b_480p_bench2dex_task03,
+        cosmos_predict2_2b_480p_bench2dex_task,
         # RoboCasa
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task__inference,

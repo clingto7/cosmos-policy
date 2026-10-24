@@ -216,10 +216,14 @@ def load_model_state_dict_from_checkpoint(
             cur_key_ckpt_full_path = os.path.join(s3_checkpoint_dir, "model")
     else:
         cur_key_ckpt_full_path = s3_checkpoint_dir
+        if checkpoint_format == "dcp" and os.path.isdir(os.path.join(cur_key_ckpt_full_path, "model")):
+            cur_key_ckpt_full_path = os.path.join(cur_key_ckpt_full_path, "model")
 
     from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path
 
-    load_from_local = True
+    # Consolidated checkpoints are deserialized on rank 0. DCP checkpoints
+    # are shard directories and must use DistributedCheckpointer locally too.
+    load_from_local = checkpoint_format == "pt"
     local_s3_ckpt_fp = get_checkpoint_path(cur_key_ckpt_full_path)
 
     if SMOKE:
@@ -418,7 +422,7 @@ def create_model_from_consolidated_checkpoint_with_fsdp(config: Config) -> Imagi
         config=config,
         s3_checkpoint_dir=config.checkpoint.load_path,
         load_ema_to_reg=config.checkpoint.load_ema_to_reg,
-        require_pretrained_match=config.job.name == "cosmos_predict2_2b_480p_bench2dex_task03",
+        require_pretrained_match=config.job.group == "bench2dex",
     )
     # If FSDP is enabled, apply FSDP to the model.
     if fsdp_shard_size > 1:

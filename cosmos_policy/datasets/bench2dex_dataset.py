@@ -350,7 +350,8 @@ class Bench2DexDataset:
             "image_size": np.full(4, self.image_size, dtype=np.float32),
             "value_function_return": -100.0,
             "value_function_sample_mask": 0,
-            "world_model_sample_mask": 1,
+            # This dataset yields policy demonstrations, not rollout world-model samples.
+            "world_model_sample_mask": 0,
             "rollout_data_mask": 0,
             "rollout_data_success_mask": 0,
             "__key__": f"{info.path.name}:{start}",

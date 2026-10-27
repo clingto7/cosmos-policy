@@ -127,8 +127,11 @@ class CosmosPolicyVideo2WorldModel(CosmosPolicyDiffusionModel):
         if "rollout_data_mask" in data_batch:
             # For world model, set the video input mask to 1 for the action frame (i.e. make it a clean/denoised conditioning frame)
             # For value function, set mask to 1 for everything except the value function return frame (should be 0)
-            world_model_sample_mask = data_batch["world_model_sample_mask"]
-            value_function_sample_mask = data_batch["value_function_sample_mask"]
+            # These subtype masks only apply to rollout samples. Demo samples
+            # predict their action chunk and must never condition on its target.
+            rollout_data_mask = data_batch["rollout_data_mask"]
+            world_model_sample_mask = data_batch["world_model_sample_mask"] * rollout_data_mask
+            value_function_sample_mask = data_batch["value_function_sample_mask"] * rollout_data_mask
             # Expand masks from (B,) to (B, 1, 1, H', W')
             H_latent, W_latent = condition.condition_video_input_mask_B_C_T_H_W.shape[-2:]
             world_model_sample_mask = (

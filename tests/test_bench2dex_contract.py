@@ -135,6 +135,8 @@ class Bench2DexContractTest(unittest.TestCase):
             self.assertEqual(first["video"].shape, (3, 49, 4, 4))
             self.assertEqual(first["actions"].shape, (16, 2))
             self.assertEqual(first["future_frame"], 17)
+            self.assertEqual(first["rollout_data_mask"], 0)
+            self.assertEqual(first["world_model_sample_mask"], 0)
             self.assertEqual(first["video"][0, 5, 0, 0], 1)  # left wrist, current
             self.assertEqual(first["video"][0, 9, 0, 0], 41)  # right wrist, current
             self.assertEqual(first["video"][0, 13, 0, 0], 81)  # stereo left, current

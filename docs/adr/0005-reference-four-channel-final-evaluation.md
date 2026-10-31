@@ -1,0 +1,9 @@
+# Reproduce the Bench2Dex four-channel protocol for final evaluation
+
+After selecting one checkpoint with pilot seeds, evaluate that checkpoint on 50 episodes in each of `none`, `cov_only`, `inv_only`, and `inv_cov`. Use the Bench2Dex reference anchor directory for the first three channels, independent Full samples, the reference seed namespaces, and each scene's expert-derived episode budget. The earlier 1200-policy-step task03/task06 runs are pilots and are not leaderboard-comparable final scores.
+
+Keep every episode's benchmark result, rollout HDF5, video, and attempt log. Retry infrastructure errors with the same channel, episode index, and seed; a valid unsuccessful episode remains a failure in SR. Compute SR and LSCR from the benchmark's per-episode fields. Compute success-conditioned efficiency as expert mean completion steps divided by the pooled mean steps to stable success among successful policy episodes. Report each channel and the four-channel mean for each task. Report overall means only after all 26 tasks have completed; until then, label aggregates as partial.
+
+Compare candidate checkpoints on the same pilot scene seeds (`300000000` for anchor channels and independent `400000000` for Full). For the task03 training-budget curve, evaluate each available checkpoint on the complete 50 episodes per channel so that 20k through 50k have the same measurement precision. Keep final comparison seeds (`100000000` and `200000000`) unused until checkpoint selection. Pilot summaries are excluded from the final aggregate.
+
+This choice prioritizes direct comparison with the official leaderboard over the cheaper uniform 1200-step single-channel pilot protocol. It also costs more simulation time and storage, so the evaluation runner must support safe resume and strict completeness checks.

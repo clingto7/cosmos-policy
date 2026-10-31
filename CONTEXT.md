@@ -16,6 +16,18 @@ A sequence of future active-joint targets produced from one observation.
 **Evaluation channel**:
 One of the Bench2Dex simulation conditions `none`, `cov`, `inv`, or `inv_cov`.
 
+**Matched anchor**:
+The recorded scene sample shared by episode index across the `none`, `cov`, and `inv` evaluation channels. The `inv_cov` channel draws an independent scene sample.
+
+**Stable success rate (SR)**:
+The fraction of episodes whose task terminal condition holds for the required dwell time.
+
+**Latched stage completion rate (LSCR)**:
+The fraction of dependency-valid task stages reached at least once in an episode, including stages later reversed.
+
+**Success-conditioned efficiency (Eff.)**:
+The expert mean completion steps divided by the policy mean steps to stable success among successful policy episodes.
+
 **Pilot evaluation**:
 Closed-loop Bench2Dex episodes on fixed seeds used to compare training checkpoints.
 

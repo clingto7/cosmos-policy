@@ -112,7 +112,22 @@ class EmbodimentMetricsCallback(Callback):
                 return str(value)
 
             (root / "resolved-training.json").write_text(json.dumps(self.config.to_dict(), default=serialize, indent=2))
-            self.journal = MetricsJournal(root / "metrics.jsonl", self.task_ids, self.budget.global_batch, iteration)
+            summary = json.loads((root / "dataset-summary.json").read_text())
+            self.journal = MetricsJournal(
+                root / "metrics.jsonl", self.task_ids, self.budget.global_batch, iteration,
+                task_windows={t: summary["tasks"][t]["valid_windows"] for t in self.task_ids},
+            )
+
+            import socket
+
+            device = torch.cuda.current_device()
+            self.journal.append({
+                "event": "runtime", "hostname": socket.gethostname(),
+                "world_size": distributed.get_world_size(),
+                "rank0_gpu": torch.cuda.get_device_name(device),
+                "rank0_gpu_total_bytes": torch.cuda.get_device_properties(device).total_memory,
+                "torch_version": torch.__version__, "cuda_version": torch.version.cuda,
+            })
 
     def on_training_step_batch_start(self, model, data_batch, iteration=0):
         for task_id in data_batch["task_id"]:

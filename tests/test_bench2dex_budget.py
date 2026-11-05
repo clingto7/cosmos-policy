@@ -177,3 +177,23 @@ def test_complete_libero_recipe_time_scaling():
     original = Budget(2, 40000)
     assert original.first_cycle_steps == 30000 and original.warmup_steps == 1000
     assert budget.scheduler()["f_min"] == original.scheduler()["f_min"] == [0.3, 0.06]
+
+
+def test_monitoring_weighted_trends_exposure_and_resume(tmp_path):
+    path = tmp_path / 'metrics.jsonl'
+    journal = MetricsJournal(path, ['03', '79'], 4, 0, task_windows={'03': 10, '79': 20})
+    journal.update(1, 1., [1e-4], [1e-4], {'03': 1, '79': 3},
+                   {'task_action_l1': {'03': 10., '79': 2.}})
+    journal.update(2, 1., [1e-4], [1e-4], {'03': 3, '79': 1},
+                   {'task_action_l1': {'03': 2., '79': 6.}})
+    row = json.loads(path.read_text().splitlines()[-1])
+    assert row['task_action_l1_rolling100'] == {'03': 4., '79': 3.}
+    assert row['task_window_exposure'] == {'03': .4, '79': .2}
+    assert row['samples_per_second'] > 0 and row['timestamp_utc']
+    resumed = MetricsJournal(path, ['03', '79'], 4, 1, task_windows={'03': 10, '79': 20})
+    resumed.update(2, 1., [1e-4], [1e-4], {'03': 4, '79': 0},
+                   {'task_action_l1': {'03': 1., '79': None}})
+    row = json.loads(path.read_text().splitlines()[-1])
+    assert row['rolling_updates'] == 1
+    assert row['task_action_l1_rolling100'] == {'03': 1., '79': None}
+    assert row['task_window_exposure'] == {'03': .5, '79': .15}

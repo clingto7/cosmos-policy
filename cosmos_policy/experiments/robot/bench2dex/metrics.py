@@ -3,12 +3,20 @@
 import json
 import math
 import os
+import time
 import uuid
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 class MetricsJournal:
-    def __init__(self, path, task_ids, global_batch, resume_iteration):
+    def __init__(self, path, task_ids, global_batch, resume_iteration, task_windows=None):
+        self.task_windows = task_windows
+        if task_windows is not None and (set(task_windows) != set(task_ids) or any(v <= 0 for v in task_windows.values())):
+            raise ValueError("invalid task window denominators")
+        self.recent = deque(maxlen=100)
+        self.last_update_time = time.monotonic()
         self.path = Path(path)
         self.task_ids = list(task_ids)
         self.global_batch = global_batch
@@ -33,11 +41,11 @@ class MetricsJournal:
         # Separate any partial last line before appending a new session.
         with self.path.open("a") as stream:
             stream.write("\n")
-        self.append({"event": "start", "iteration": resume_iteration, "task_samples_seen": self.counts})
+        self.append({"event": "start", "iteration": resume_iteration, "task_samples_seen": self.counts, "smoothing_reset": True})
 
     def append(self, record):
         with self.path.open("a") as stream:
-            stream.write(json.dumps({"session": self.session, **record}, allow_nan=False) + "\n")
+            stream.write(json.dumps({"session": self.session, "timestamp_utc": datetime.now(timezone.utc).isoformat(), **record}, allow_nan=False) + "\n")
 
     def update(self, iteration, loss, lr_used, lr_next, task_counts, diagnostics=None):
         if iteration != self.iteration + 1 or set(task_counts) != set(self.task_ids):
@@ -49,6 +57,28 @@ class MetricsJournal:
         diagnostics = diagnostics or {}
         # Validate before advancing in-memory state or writing a partial JSON record.
         json.dumps(diagnostics, allow_nan=False)
+        now = time.monotonic()
+        seconds = now - self.last_update_time
+        recent = [*self.recent, (dict(task_counts), diagnostics)][-100:]
+        smooth = {}
+        for metric in ("task_action_l1", "task_action_mse"):
+            smooth[metric + "_rolling100"] = {}
+            for task in self.task_ids:
+                pairs = [(counts[task], data.get(metric, {}).get(task)) for counts, data in recent]
+                pairs = [(count, value) for count, value in pairs if count and value is not None]
+                denominator = sum(count for count, _ in pairs)
+                smooth[metric + "_rolling100"][task] = (
+                    sum(count * value for count, value in pairs) / denominator if denominator else None
+                )
+        diagnostics = {**diagnostics, **smooth, "rolling_updates": len(recent),
+                       "update_wall_seconds": seconds, "samples_per_second": self.global_batch / seconds}
+        if self.task_windows is not None:
+            diagnostics["task_window_exposure"] = {
+                t: (self.counts[t] + task_counts[t]) / self.task_windows[t] for t in self.task_ids
+            }
+        json.dumps(diagnostics, allow_nan=False)
+        self.recent.append((dict(task_counts), diagnostics))
+        self.last_update_time = now
         self.counts = {k: self.counts[k] + task_counts[k] for k in self.task_ids}
         self.iteration = iteration
         self.append(

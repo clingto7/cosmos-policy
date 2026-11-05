@@ -309,8 +309,11 @@ def test_launcher_idempotence_restore_probe_and_run_identity(prepared, monkeypat
     command, identity, run_dir = launcher.plan_run(args)
     monkeypatch.setattr(launcher, "check_training_devices", lambda smoke, world_size: None)
     launches = []
+    real_run = launcher.subprocess.run
 
     def simulate_worker(command, **kwargs):
+        if command[0] == "git":
+            return real_run(command, **kwargs)
         # Replace only the GPU subprocess; admission and DCP validation remain real.
         launches.append(command)
         assert kwargs["env"]["BENCH2DEX_EMBODIMENT_MANIFEST"] == str(prepared.bundle)
@@ -322,6 +325,9 @@ def test_launcher_idempotence_restore_probe_and_run_identity(prepared, monkeypat
     launcher.execute_run(args, command, identity, run_dir)
     launcher.execute_run(args, command, identity, run_dir)
     assert len(launches) == 1  # completed run is not accidentally retrained
+    assert json.loads((run_dir / "deployment.json").read_text())["commit"]
+    assert json.loads((run_dir / "dataset-summary.json").read_text())["tasks"]
+    assert json.loads((run_dir / "manifest.snapshot.json").read_text())["tasks"]
     args.verify_restore = True
     launcher.execute_run(args, command, identity, run_dir)
     assert len(launches) == 2
@@ -339,3 +345,20 @@ def test_bundle_rechecks_complete_group_and_reference(prepared):
     prepared.grouping.write_text('{}')
     with pytest.raises(ValueError, match='grouping reference'):
         read_bundle(prepared.bundle, str(prepared.robot_map))
+
+
+def test_dataset_monitoring_matches_actual_sampler_windows(prepared):
+    from cosmos_policy.datasets.bench2dex_embodiment import load_embodiment_dataset, read_bundle
+    from cosmos_policy.experiments.robot.bench2dex.budget import Budget
+    from cosmos_policy.experiments.robot.bench2dex.monitoring import dataset_summary
+
+    bundle, profile, _ = read_bundle(prepared.bundle, str(prepared.robot_map))
+    summary = dataset_summary(bundle, profile, Budget(2))
+    dataset = load_embodiment_dataset(str(prepared.bundle), str(prepared.robot_map))
+    for task, child in zip(dataset.task_ids, dataset.datasets):
+        record = summary['tasks'][task]
+        assert record['episode_count'] == 100
+        assert record['valid_windows'] == len(child)
+        assert record['expected_window_exposure'] == 2048000 / len(child)
+        assert sum(e['valid_windows'] for e in record['episodes']) == len(child)
+        assert 0 < record['padded_action_windows'] <= len(child)

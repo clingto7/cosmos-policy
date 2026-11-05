@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 1 task(s): 2 GPUs x microbatch 16 x accumulation 2 = global batch 64.
 # 32,000 optimizer updates; 2,048,000 total draws; 2,048,000 expected draws/task.
-# Peak LR 1e-4; 1,067-step warmup; cosine to 6e-6 at step 32,000.
+# Peak LR 1e-4; 800-step warmup; linear to 3e-5 at 24k, then constant 6e-6 until 32k.
 # Required paths: MANIFEST ROBOT_MAP BASE_MODEL TOKENIZER OUTPUT RUN_NAME.
 # Default is a read-only plan. Pass --execute to train, --smoke --execute to verify.
 set -euo pipefail

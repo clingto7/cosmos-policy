@@ -325,3 +325,45 @@ tests rather than separate full-model runs. The eight short rollouts are not
 benchmark scores; final evaluation still requires the trained 50k checkpoint and
 50 episodes per channel for each task. Bitwise continuation equivalence is not
 claimed because model RNG restoration is outside this implementation.
+
+### Monitoring and dataset exposure
+
+Deployment uses committed Git revisions: push locally, pull the intended revision
+on the server, then compare commits and source hashes. Do not deploy source-file
+snapshots in place of this workflow.
+
+Before execution, the launcher verifies episode hashes and writes:
+
+- `manifest.snapshot.json`: audited inputs, task prompts, embeddings and shared
+  normalization statistics, preserved with the run.
+- `dataset-summary.json`: per-episode frame counts, excluded tail and invalid
+  frames, valid action-start windows, padded action windows, source hashes and
+  task-level totals. Every valid start counts as one window, including starts
+  whose action chunk uses repeat-last padding. The summary also records cameras,
+  active joints, control frequency, action horizon and expected exposure.
+- `deployment.json`: Git commit, dirty-worktree indicator and source fingerprint.
+  `run-identity.json` and `resolved-training.json` retain budget, input hashes,
+  software versions and resolved optimizer/model configuration.
+
+`metrics.jsonl` records UTC time, session, optimizer update, loss, actual/next LR,
+per-task sample counts, raw action L1/MSE and gradient clipping diagnostics.
+It additionally records per-task sample-weighted trailing-100-update L1/MSE,
+actual draws divided by valid windows, update wall time and sample throughput.
+Wall time includes intervening data waits/checkpoint work; the first update also
+includes startup after journal creation. These are not isolated GPU kernel times.
+The runtime event records hostname, world size, rank-0 GPU model/memory and
+PyTorch/CUDA versions. GPU identifiers and credentials are not recorded.
+
+Rolling metrics reset on every resume session, with `rolling_updates` reporting
+how much history is available. Cumulative exposure resumes from the checkpoint's
+sample counts, excluding rolled-back attempts. Raw records remain append-only;
+consumers must respect session/start events rather than concatenate abandoned
+updates into a single trajectory.
+
+Exposure is repeated window sampling, not unique coverage or strict epochs.
+Action metrics measure single-step noisy denoising latent error, including action
+padding, not physical joint error, held-out loss or closed-loop success. No
+validation split or automatic LR adjustment is introduced. Monitor each task's
+smoothed L1 and the change across the LR transition; compare with separately
+recorded closed-loop evaluations before interpreting a lower training loss as
+better policy performance.

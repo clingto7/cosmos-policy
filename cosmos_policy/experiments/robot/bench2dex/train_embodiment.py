@@ -162,13 +162,28 @@ def execute_run(args, command, identity, run_dir):
         if complete and not args.verify_restore:
             print(f"Run already complete: {checkpoint}")
             return
-        bundle, _, _ = read_bundle(args.manifest, str(args.robot_map))
+        bundle, profile, _ = read_bundle(args.manifest, str(args.robot_map))
         for task in bundle["tasks"]:
             for entry in task["audit"]["entries"]:
                 source = Path(entry["source"]).resolve()
                 check_output_path(source)
                 if file_hash(source) != entry["sha256"]:
                     raise ValueError(f"demonstration changed since audit: {source}")
+        from cosmos_policy.experiments.robot.bench2dex.monitoring import dataset_summary
+
+        summary = dataset_summary(bundle, profile, Budget(len(bundle["tasks"]), identity["max_iter"]))
+        summary_path = run_dir / "dataset-summary.json"
+        if summary_path.exists() and json.loads(summary_path.read_text()) != json.loads(json.dumps(summary)):
+            raise ValueError("dataset monitoring summary changed since launch")
+        atomic_json(summary_path, summary)
+        atomic_json(run_dir / "manifest.snapshot.json", bundle)
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=args.repo, capture_output=True, text=True)
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=args.repo, capture_output=True, text=True)
+        atomic_json(run_dir / "deployment.json", {
+            "commit": revision.stdout.strip() if revision.returncode == 0 else None,
+            "dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+            "source_sha256": identity["source_sha256"],
+        })
         environment = os.environ.copy()
         for key in list(environment):
             if key.startswith("BENCH2DEX_"):

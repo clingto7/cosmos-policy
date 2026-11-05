@@ -1,11 +1,27 @@
 # Cosmos Policy on Bench2Dex
 
-This context defines the robot data and evaluation language used to adapt Cosmos Policy to Bench2Dex.
+This context defines the robot data and evaluation language used to adapt Cosmos Policy to Bench2Dex. The planned per-embodiment mode is defined in [ADR 0007](docs/adr/0007-per-embodiment-training-budget.md).
+
+## Current batch workflow
+
+New per-task runs follow [ADR 0006](docs/adr/0006-fixed-budget-two-gpu-batch.md)
+and the [fixed-budget workflow](docs/experiments/fixed-budget-batch.md): two H100
+GPUs, global batch 64, 25k optimizer updates, full saves every 5k, fixed 25k
+selection, and 200 final episodes per task without a separate pilot. Issue #10 owns
+batch execution and #11 owns final evaluation. Old checkpoint reconciliation is
+deferred. Existing relay jobs were explicitly left unchanged on 2026-11-03;
+the unified registry/dispatcher is specified but not deployed.
 
 ## Language
 
 **Robot key**:
 The Bench2Dex identifier for a robot embodiment, which determines its joint set.
+
+**Embodiment**:
+The physical dual-arm and dexterous-hand assembly identified by a Bench2Dex robot key. One embodiment can have one or more benchmark tasks.
+
+**Per-embodiment policy**:
+A policy shared by the tasks assigned to one embodiment, with the standard task description specifying the requested behavior.
 
 **Active joint**:
 A robot joint independently targeted by the policy, excluding mimic joints.

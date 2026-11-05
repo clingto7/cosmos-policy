@@ -73,6 +73,7 @@ class EmbodimentMetricsCallback(Callback):
         self.losses = []
         self.counts = dict.fromkeys(self.task_ids, 0)
         self.journal = None
+        self.action_sums = []
 
     def on_train_start(self, model, iteration=0):
         import json
@@ -124,24 +125,58 @@ class EmbodimentMetricsCallback(Callback):
         self.lr_used = [float(group["lr"]) for group in optimizer.param_groups]
 
     def on_before_zero_grad(self, model, optimizer, scheduler, iteration=0):
+        self.lr_next = [float(g["lr"]) for g in optimizer.param_groups]
+        model = getattr(model, "module", model)
+        stats = model.last_grad_clip_stats
+        norm = float(stats["norm_before"].item())
+        limit = float(stats["clip_norm"])
+        self.grad_stats = {
+            "grad_norm_before_clip": norm,
+            "grad_clip_norm": limit,
+            "grad_clip_scale": min(1.0, limit / (norm + 1e-6)),
+            "grad_clipped": norm > limit,
+        }
+
+    def on_training_step_batch_end(self, model, data_batch, output_batch, loss, iteration=0):
         import torch.distributed as dist
 
+        mse = output_batch["action_mse_per_sample"].detach().double()
+        l1 = output_batch["action_l1_per_sample"].detach().double()
+        if mse.shape != (len(data_batch["task_id"]),) or l1.shape != mse.shape:
+            raise ValueError("action diagnostics must contain one value per sampled window")
+        self.action_sums.append(torch.stack([
+            value[torch.tensor([t == task for t in data_batch["task_id"]], device=value.device)].sum()
+            for task in self.task_ids for value in (mse, l1)
+        ]))
+        if len(self.losses) < self.budget.grad_accum_iter:
+            return
         if len(self.losses) != self.budget.grad_accum_iter:
             raise ValueError("loss accumulation does not match optimizer update")
-        values = torch.stack(
-            [sum(self.losses), *[self.losses[0].new_tensor(self.counts[task_id]) for task_id in self.task_ids]]
-        )
+        values = torch.cat([
+            torch.stack([sum(self.losses), *[
+                self.losses[0].new_tensor(self.counts[t]) for t in self.task_ids
+            ]]),
+            torch.stack(self.action_sums).sum(0),
+        ])
         dist.all_reduce(values)
         values = values.tolist()
+        counts = dict(zip(self.task_ids, (int(v) for v in values[1:1 + len(self.task_ids)])))
+        action = values[1 + len(self.task_ids):]
         if self.journal is not None:
             self.journal.update(
                 iteration + 1,
                 values[0] / (self.budget.world_size * self.budget.grad_accum_iter),
-                self.lr_used,
-                [float(g["lr"]) for g in optimizer.param_groups],
-                dict(zip(self.task_ids, (int(v) for v in values[1:]))),
+                self.lr_used, self.lr_next, counts,
+                diagnostics={
+                    **self.grad_stats,
+                    "task_action_mse": {t: action[2*i] / counts[t] if counts[t] else None
+                                        for i, t in enumerate(self.task_ids)},
+                    "task_action_l1": {t: action[2*i+1] / counts[t] if counts[t] else None
+                                       for i, t in enumerate(self.task_ids)},
+                },
             )
         self.losses.clear()
+        self.action_sums.clear()
         self.counts = dict.fromkeys(self.task_ids, 0)
 
     def on_save_checkpoint_start(self, model, iteration=0):

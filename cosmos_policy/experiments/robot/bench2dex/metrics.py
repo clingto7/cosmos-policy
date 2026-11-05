@@ -39,13 +39,16 @@ class MetricsJournal:
         with self.path.open("a") as stream:
             stream.write(json.dumps({"session": self.session, **record}, allow_nan=False) + "\n")
 
-    def update(self, iteration, loss, lr_used, lr_next, task_counts):
+    def update(self, iteration, loss, lr_used, lr_next, task_counts, diagnostics=None):
         if iteration != self.iteration + 1 or set(task_counts) != set(self.task_ids):
             raise ValueError("nonsequential optimizer metrics or changed task IDs")
         if sum(task_counts.values()) != self.global_batch or any(v < 0 for v in task_counts.values()):
             raise ValueError("observed samples do not match global batch")
         if not all(math.isfinite(v) for v in [loss, *lr_used, *lr_next]):
             raise ValueError("nonfinite training metrics")
+        diagnostics = diagnostics or {}
+        # Validate before advancing in-memory state or writing a partial JSON record.
+        json.dumps(diagnostics, allow_nan=False)
         self.counts = {k: self.counts[k] + task_counts[k] for k in self.task_ids}
         self.iteration = iteration
         self.append(
@@ -58,6 +61,7 @@ class MetricsJournal:
                 "loss": loss,
                 "lr_used": lr_used,
                 "lr_next": lr_next,
+                **diagnostics,
             }
         )
 

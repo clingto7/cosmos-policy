@@ -98,6 +98,10 @@ class GradClip(Callback):
 
         total_norm = model.clip_grad_norm_(self.clip_norm)
 
+        model.last_grad_clip_stats = {
+            "norm_before": total_norm.detach(),
+            "clip_norm": self.clip_norm,
+        }
         self._cur_state.update(total_norm)
         if iteration % self.config.trainer.logging_iter == 0:
             avg_img_mag, avg_video_mag = self.img_mag_log.get_stat(), self.video_mag_log.get_stat()

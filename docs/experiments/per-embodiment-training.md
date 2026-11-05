@@ -85,7 +85,10 @@ The bundle selects one of three explicit launch scripts:
 
 All three retain peak LR `1e-4`; no automatic batch-based LR scaling is applied.
 Warmup is `round(max_steps / 30)` (clamped to `[1, max_steps-1]`), followed by
-cosine decay to `6e-6` at `max_steps`, with no discontinuous second-stage drop.
+the original `LambdaLinearScheduler` linear decay to `3e-5` at `max_steps`.
+The original subsequent switch to constant `6e-6` is preserved; a normal run
+stops before using that stage. Only the time axis is scaled. This supersedes
+the cosine curve introduced in 511fd07.
 At 32k this gives 1,067 warmup updates. The standalone launcher accepts
 `--max-steps` for separate experiments; all dependent counts and LR durations
 follow it. The accepted production/final-evaluation protocol remains 32k.
@@ -104,6 +107,21 @@ install nothing. Use a separate `RUN_NAME` with `--smoke --execute` for a four-s
 proof, and the same smoke command plus `--verify-restore` for a reload-only proof.
 Smoke also shortens its dataset and LR horizon to four updates. It is never a
 production checkpoint or a continuation of the old 50k recipe.
+
+Each optimizer-update row in `metrics.jsonl` also records `task_action_mse`
+and `task_action_l1`, averaged by actual window count across all ranks and both
+microbatches. These are denoised action-latent diagnostics (the same representation
+as the existing action loss), not joint-angle error or rollout success. A task
+absent from an update has JSON `null`, not a fabricated zero. The row includes
+`grad_norm_before_clip`, `grad_clip_norm`, `grad_clip_scale`, and `grad_clipped`.
+The scale is the clipping coefficient; it is not a second clipping operation.
+Diagnostics are detached from autograd and committed before checkpoint saving.
+Aggregate clipping frequency can be computed as the fraction of committed rows
+with `grad_clipped=true`; select the resumed trajectory using session boundaries.
+
+Bundle loading rechecks the grouping reference SHA256 and complete task IDs, so
+the pinned grouping file must remain available at `grouping_path`, including on
+evaluation hosts. A modified subset cannot silently select another GPU budget.
 
 Task selection
 is uniform in expectation, followed by uniform valid-window selection within

@@ -22,16 +22,20 @@ hand-selected subset of tasks.
 
 The owner requires the LR schedule to follow `max_steps`, rather than an inherited
 fixed horizon, and approves keeping the same peak LR across all three batches.
-The implementation retains peak LR `1e-4`, preserves the original warmup fraction
-`1000 / 30000` (1,067 updates at 32k), and uses one smooth cosine decay to `6e-6`
-at the configured endpoint. That minimum is the old recipe's eventual constant
-LR. These warmup/minimum choices are implementation defaults, recorded explicitly;
-they are not claims that the best LR has been experimentally established.
+The owner clarified on 2026-11-05 that only the time axis should scale; changing
+the decay shape was not intended. New runs retain the original
+`LambdaLinearScheduler`, peak LR `1e-4`, warmup fraction `1000 / 30000`
+(1,067 updates at 32k), and original factors: `f_start=[1e-6, 0.06]`,
+`f_max=[1.0, 0.06]`, `f_min=[0.3, 0.06]`. The first cycle length is `max_steps`;
+the subsequent constant cycle retains the original effectively unlimited length.
+Thus the first cycle ends at `3e-5`; only after that boundary does the schedule
+switch to `6e-6`. Normal 32k training stops before using the constant stage.
+LambdaLR update k uses schedule(k-1), then prepares schedule(k) for the next update.
 
-Audit found the previous experiment inherited `LambdaLinearScheduler` with a
-30k first interval and a subsequent constant factor of 0.06. It was neither a
-50k schedule nor automatically bound to the training stop. New runs explicitly
-select their scheduler and do not alter the old per-task configuration.
+This correction supersedes the cosine-to-6e-6 implementation in 511fd07. That
+implementation changed both the decay shape and endpoint, not just the budget.
+Historical per-task configurations remain unchanged. The original first cycle
+was fixed at 30k; only the new embodiment recipe binds its duration to the budget.
 
 Freeze the recipe, input/code hashes and environment in `run-identity.json`.
 Save the resolved training configuration and optimizer settings. Record global

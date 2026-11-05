@@ -206,7 +206,11 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
         assert recipe["trainer"]["callbacks"][name]["run_at_start"] is False
     assert recipe["checkpoint"]["save_iter"] == 5000
     assert recipe["checkpoint"]["dcp_async_mode_enabled"] is False
-    assert recipe["scheduler"]["cycle_lengths"] == [32000, 32000]
+    assert recipe["scheduler"]["cycle_lengths"] == [32000, 100000000000000]
+    assert recipe["scheduler"]["_target_"] == "cosmos_policy._src.imaginaire.functional.lr_scheduler.LambdaLinearScheduler"
+    assert recipe["scheduler"]["f_start"] == [1e-6, 0.06]
+    assert recipe["scheduler"]["f_max"] == [1.0, 0.06]
+    assert recipe["scheduler"]["f_min"] == [0.3, 0.06]
     assert original["scheduler"]["cycle_lengths"][0] == 30000
     assert len(dataset) == 128 * 32000
     weights, tokenizer = prepared.root / "base.pt", prepared.root / "tokenizer.pth"
@@ -229,7 +233,7 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     args.max_steps = 12000
     _, shorter, _ = plan_run(args)
     assert shorter["total_samples"] == 128 * 12000
-    assert shorter["scheduler"]["cycle_lengths"] == [12000, 12000]
+    assert shorter["scheduler"]["cycle_lengths"] == [12000, 100000000000000]
     monkeypatch.setenv("BENCH2DEX_MAX_STEPS", "12000")
     shorter_recipe = make_embodiment_experiment(original, str(prepared.bundle), str(prepared.robot_map), "test_robot")
     assert shorter_recipe["dataloader_train"]["dataset"]["total_samples"] == 128 * 12000
@@ -319,3 +323,15 @@ def test_launcher_idempotence_restore_probe_and_run_identity(prepared, monkeypat
     assert len(launches) == 2
     with pytest.raises(ValueError, match="different data, weights, code"):
         launcher.execute_run(args, command, {**identity, "base_model_sha256": "different"}, run_dir)
+
+
+def test_bundle_rechecks_complete_group_and_reference(prepared):
+    bundle = json.loads(prepared.bundle.read_text())
+    bundle['tasks'] = bundle['tasks'][:1]
+    bundle['statistics'] = bundle['tasks'][0]['audit']['statistics']
+    prepared.bundle.write_text(json.dumps(bundle))
+    with pytest.raises(ValueError, match='complete task group'):
+        read_bundle(prepared.bundle, str(prepared.robot_map))
+    prepared.grouping.write_text('{}')
+    with pytest.raises(ValueError, match='grouping reference'):
+        read_bundle(prepared.bundle, str(prepared.robot_map))

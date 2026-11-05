@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from cosmos_policy.datasets.bench2dex_embodiment import EmbodimentDataset, EmbodimentSampler
-from cosmos_policy.experiments.robot.bench2dex.budget import Budget, BudgetCosineScheduler
+from cosmos_policy.experiments.robot.bench2dex.budget import Budget
 from cosmos_policy.experiments.robot.bench2dex.metrics import MetricsJournal
 
 
@@ -33,12 +33,27 @@ def test_budget_rank_partition_and_resume(tasks, gpus, micro, gb, total):
 
 
 @pytest.mark.parametrize("steps", [4, 100, 32000, 50000])
-def test_cosine_warmup_end_and_real_torch_scheduler_resume(steps):
+def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monkeypatch):
+    import importlib.util
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "cosmos_policy._src.imaginaire.utils.log", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "cosmos_policy._src.imaginaire.utils.distributed", SimpleNamespace())
+    path = Path(__file__).parents[1] / "cosmos_policy/_src/imaginaire/functional/lr_scheduler.py"
+    spec = importlib.util.spec_from_file_location("original_scheduler_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    LinearScheduler = module.LambdaLinearScheduler
     budget = Budget(2, steps)
-    curve = BudgetCosineScheduler(**budget.scheduler())
+    curve = LinearScheduler(**budget.scheduler())
     assert curve.schedule(0) == pytest.approx(1e-6)
     assert curve.schedule(budget.warmup_steps) == pytest.approx(1)
-    assert curve.schedule(steps) == pytest.approx(0.06)
+    assert curve.schedule(steps) == pytest.approx(0.3)
+    assert curve.schedule(steps + 1) == pytest.approx(0.06)
+    # Preserve the original curve, with only its time axis scaled.
+    midpoint = (steps + budget.warmup_steps) / 2
+    assert curve.schedule(midpoint) == pytest.approx(0.65)
     assert curve.schedule(steps + 100) == pytest.approx(0.06)
     values = [curve.schedule(i) for i in range(budget.warmup_steps, steps + 1)]
     assert np.all(np.diff(values) <= 0)
@@ -51,7 +66,7 @@ def test_cosine_warmup_end_and_real_torch_scheduler_resume(steps):
     state = scheduler.state_dict()
     optstate = optimizer.state_dict()
     other_opt = torch.optim.SGD([param], lr=1e-4)
-    other = torch.optim.lr_scheduler.LambdaLR(other_opt, BudgetCosineScheduler(**budget.scheduler()).schedule)
+    other = torch.optim.lr_scheduler.LambdaLR(other_opt, LinearScheduler(**budget.scheduler()).schedule)
     other_opt.load_state_dict(optstate)
     other.load_state_dict(state)
     optimizer.step()
@@ -104,3 +119,52 @@ def test_training_scripts_require_inputs_and_pass_expected_task_guard(tmp_path, 
     assert argv[argv.index("--max-steps") + 1] == "32000"
     assert argv[argv.index("--manifest") + 1] == "path with spaces"
     assert "--execute" not in argv
+
+
+def test_metrics_callback_aggregates_microbatches_and_missing_tasks(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+    from types import SimpleNamespace
+    # Only the callback framework/logging are stubbed; the aggregation and journal
+    # below execute the real production code and real torch tensor operations.
+    monkeypatch.setitem(sys.modules, "cosmos_policy._src.imaginaire.utils.log", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "cosmos_policy._src.imaginaire.utils.callback", SimpleNamespace(Callback=object))
+    spec = importlib.util.spec_from_file_location("proof_under_test", Path(__file__).parents[1] / "cosmos_policy/bench2dex_proof.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    EmbodimentMetricsCallback = module.EmbodimentMetricsCallback
+
+    callback = EmbodimentMetricsCallback(['03', '79'])
+    callback.budget = SimpleNamespace(grad_accum_iter=2, world_size=1)
+    callback.journal = MetricsJournal(tmp_path / 'metrics.jsonl', ['03', '79'], 4, 0)
+    monkeypatch.setattr(torch.distributed, 'all_reduce', lambda values: None)
+    model = SimpleNamespace(last_grad_clip_stats={'norm_before': torch.tensor(2.), 'clip_norm': 1.})
+    optimizer = SimpleNamespace(param_groups=[{'lr': 1e-4}])
+    for tasks, mse, l1 in [(['03', '03'], [1., 3.], [1., 1.]), (['03', '79'], [8., 10.], [4., 2.])]:
+        data = {'task_id': tasks}
+        callback.on_training_step_batch_start(model, data)
+        callback.on_before_backward(model, torch.tensor(2.))
+        if len(callback.losses) == 2:
+            callback.on_before_optimizer_step(model, optimizer, None, None)
+            optimizer.param_groups[0]['lr'] = 9e-5
+            callback.on_before_zero_grad(model, optimizer, None)
+        callback.on_training_step_batch_end(model, data, {
+            'action_mse_per_sample': torch.tensor(mse), 'action_l1_per_sample': torch.tensor(l1)
+        }, None)
+    row = json.loads((tmp_path / 'metrics.jsonl').read_text().splitlines()[-1])
+    assert row['task_action_mse'] == {'03': 4., '79': 10.}
+    assert row['task_action_l1'] == {'03': 2., '79': 2.}
+    assert row['grad_norm_before_clip'] == 2. and row['grad_clipped'] is True
+    assert row['grad_clip_scale'] == pytest.approx(.5)
+    assert row['lr_used'] == [1e-4] and row['lr_next'] == [9e-5]
+    # A task absent from an entire update has null diagnostics, never NaN/zero.
+    for _ in range(2):
+        data = {'task_id': ['03', '03']}
+        callback.on_training_step_batch_start(model, data, iteration=1)
+        callback.on_before_backward(model, torch.tensor(1.), iteration=1)
+        callback.on_training_step_batch_end(model, data, {
+            'action_mse_per_sample': torch.ones(2), 'action_l1_per_sample': torch.ones(2)
+        }, None, iteration=1)
+    row = json.loads((tmp_path / 'metrics.jsonl').read_text().splitlines()[-1])
+    assert row['task_action_mse']['79'] is None
+    assert row['task_samples_seen'] == {'03': 7, '79': 1}

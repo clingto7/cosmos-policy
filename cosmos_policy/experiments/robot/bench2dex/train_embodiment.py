@@ -59,6 +59,7 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         load_embedding(task, args.manifest.parent)
     check_output_path(args.output)
     run_dir = args.output.resolve() / "cosmos_policy" / "bench2dex_embodiment" / args.run_name
+    check_output_path(run_dir)
     max_iter = 4 if args.smoke else getattr(args, "max_steps", 32000)
     save_iter = 2 if args.smoke else 5000
     budget = Budget(len(bundle["tasks"]), max_iter)

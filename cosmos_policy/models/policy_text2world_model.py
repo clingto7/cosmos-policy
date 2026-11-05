@@ -679,6 +679,9 @@ class CosmosPolicyDiffusionModel(BaseDiffusionModel):
             "mse_loss": pred_mse_B_C_T_H_W.mean(),
             "edm_loss": edm_loss_B_C_T_H_W.mean(),
             "edm_loss_per_frame": torch.mean(edm_loss_B_C_T_H_W, dim=[1, 3, 4]),
+            # Detached per-window diagnostics; no change to the optimization objective.
+            "action_mse_per_sample": action_diff.detach().float().square().flatten(1).mean(1),
+            "action_l1_per_sample": action_diff.detach().float().abs().flatten(1).mean(1),
             # Demo sample losses
             "demo_sample_action_mse_loss": demo_sample_action_mse_loss,  # Main action loss for policy
             "demo_sample_action_l1_loss": demo_sample_action_l1_loss,  # Main action loss for policy

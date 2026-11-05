@@ -79,6 +79,16 @@ def validate_bundle(bundle: dict, robot_map_path: str) -> tuple[object, TaskStat
         raise ValueError("expected a nonempty Bench2Dex embodiment bundle")
     if bundle.get("robot_map_sha256") != sha256_file(robot_map_path):
         raise ValueError("robot map changed since bundle preparation")
+    grouping_path = Path(bundle.get("grouping_path", ""))
+    if not grouping_path.is_file() or sha256_file(grouping_path) != bundle.get("grouping_sha256"):
+        raise ValueError("grouping reference missing or changed since bundle preparation")
+    expected = {
+        record["task"].split("_", 1)[0]
+        for record in json.loads(grouping_path.read_text())["per_task"]
+        if record["robot_key"] == bundle["robot_key"]
+    }
+    if not expected or {task["task_id"] for task in bundle["tasks"]} != expected:
+        raise ValueError("bundle must include the complete task group for its embodiment")
     profile = load_profile(robot_map_path, bundle["robot_key"])
     if tuple(bundle["active_joint_names"]) != profile.active_joint_names:
         raise ValueError("bundle active-joint order differs from robot map")

@@ -43,7 +43,7 @@ def make_embodiment_experiment(base, manifest_path, robot_map_path, robot_key):
     }
     experiment["optimizer"] = {**experiment.get("optimizer", {}), "lr": 1e-4}
     experiment["scheduler"] = {
-        "_target_": "cosmos_policy.experiments.robot.bench2dex.budget.BudgetCosineScheduler",
+        "_target_": "cosmos_policy._src.imaginaire.functional.lr_scheduler.LambdaLinearScheduler",
         **budget.scheduler(),
     }
     experiment["checkpoint"].update(save_iter=5000, dcp_async_mode_enabled=False)

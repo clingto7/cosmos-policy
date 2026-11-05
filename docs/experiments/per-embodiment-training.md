@@ -2,8 +2,9 @@
 
 This implements [ADR 0007](../adr/0007-per-embodiment-training-budget.md).
 The CPU data/config/checkpoint contracts can be exercised locally. Real model
-forward/backward, H100 memory/throughput, FSDP restore and Isaac Sim evaluation
-still require the GPU environments and audited training data.
+forward/backward and FSDP restore require the CUDA training environment. RGB
+Isaac Sim evaluation requires a supported RTX GPU, separately from the H100
+training allocation. The validation record below states what has been exercised.
 
 ## Prepare one bundle per embodiment
 
@@ -158,3 +159,47 @@ The checkpoint tests include real CPU DCP serialization and a two-rank Gloo
 save with rank-zero-only validation. The existing conditioning/loss tests import
 the full model stack and should also run in the CUDA environment before a long
 training job.
+
+## Validation completed on 2026-11-05
+
+Implementation revision `24fd6c0` was exercised with the actual audited task03
+and task79 datasets (100 episodes each), sharing `multi_xarm7_with_ability`.
+
+| Check | Result |
+| --- | --- |
+| Complete Bench2Dex test suite in the existing CUDA environment | 35 tests and 3 subtests passed, including conditioning/loss and CPU DCP corruption/retention cases |
+| Dataset hashes, joint contracts and recomputed shared statistics | Both tasks admitted to the same bundle |
+| Two H100 GPUs, microbatch 16, accumulation 2, global batch 64 | Four optimizer updates completed with finite losses and gradients |
+| Synchronous saves at updates 2 and 4 | Model, optimizer, scheduler and trainer components validated |
+| Fresh two-rank reload at update 4 | Completed without additional optimizer updates |
+| Separate run seeded from update 2, then resumed through update 4 | Completed and saved; optimizer momentum changed; scheduler advanced from 2 to 4 |
+| Same checkpoint with a newly started service for each task | Both returned finite `(16, 34)` physical joint command chunks |
+| Same observation and seed, different standard task descriptions | Actions differed; wrong descriptions were rejected |
+| Real-artifact guards | Missing bundle, wrong task embedding and wrong task ID rejected; update 4 rejected by the final-50k gate; shared normalization verified |
+| RTX 4090 Isaac Sim smoke | Both tasks completed one 32-control-step episode in each of the four channels, with no episode errors |
+| Output inspection | All eight recordings contained finite joint states/actions and nonblank four-camera RGB; pilot seeds matched; two exported MP4s decoded |
+
+The H100 run sampled a peak of approximately 75 GiB per GPU. An earlier attempt
+sharing each card with roughly 23 GiB of another workload ran out of memory.
+Four smoke updates reduce duration, not the peak memory required by microbatch 16.
+
+Isaac Sim 5.1 failed during rendering initialization on H100 with
+`ERROR_DEVICE_LOST`; the same closed-loop checks passed on RTX 4090. NVIDIA
+[does not support GPUs without RT cores, including H100, for Isaac Sim](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/requirements.html).
+Use H100 for training and a supported RTX host for RGB simulation.
+
+Evidence is retained under the private HDD2 directory
+`/inspire/hdd2/project/roboticsystem2/ky26063/bench2dex_stuff/hqb/embodiment-validation-20261105/`:
+
+- `tests.log`, `real-artifact-guards.json` and `continuation-state-check.json`.
+- `runs/cosmos_policy/bench2dex_embodiment/smoke_exclusive_v1/` contains the original smoke checkpoints and training/reload log; `resume_from2_v1/` contains continuation evidence.
+- `runtime-rtx-v1/` contains both task RPC outputs, eight simulator commands/logs/recordings, two videos, `prompt-switch-check.json`, `complete.json` and `artifact-check.json`.
+- `exclusive.exit`, `restore.exit`, `continue.exit` and `runtime-rtx.exit` are all zero. Test policy and simulator processes were stopped after completion.
+
+This is functional acceptance for the representative two-task embodiment, not
+50k convergence evidence, a throughput estimate, or all-26-task evaluation.
+Single-task/three-task sampling and retention edge cases are covered by automated
+tests rather than separate full-model runs. The eight short rollouts are not
+benchmark scores; final evaluation still requires the trained 50k checkpoint and
+50 episodes per channel for each task. Bitwise continuation equivalence is not
+claimed because model RNG restoration is outside this implementation.

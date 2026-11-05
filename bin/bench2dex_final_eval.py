@@ -230,6 +230,7 @@ def run(args: argparse.Namespace) -> None:
         "scene": str(args.scene.resolve()),
         "anchor_dir": str(args.anchor_dir.resolve()),
         "channels": list(CHANNELS),
+        "physics_device": "cpu",
         "episodes_per_channel": args.episodes_per_channel,
         "policy_steps": policy_steps,
         "physics_steps": physics_steps,
@@ -293,7 +294,7 @@ def run(args: argparse.Namespace) -> None:
                     "--policy-type", "REMOTE", "--policy-name", "GR00T_XE",
                     "--policy-display-name", args.checkpoint_id, "--remote-host", "127.0.0.1",
                     "--remote-port", str(args.port), "--robot-key", manifest["robot_key"],
-                    "--active-dof", "--enable-rgb", "--headless", "--generalization-profile", channel,
+                    "--active-dof", "--enable-rgb", "--headless", "--device", "cpu", "--generalization-profile", channel,
                     "--generalization-split", "seen" if channel == "none" else "unseen",
                     "--seed", str(seed_pair[0]), "--inv-cov-seed", str(seed_pair[1]),
                     "--task-seed-id", str(int(args.task_id)), "--start-episode", str(start),
@@ -344,7 +345,7 @@ def main() -> None:
                  "policy-repo", "bench-repo", "policy-python", "sim-python", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--port", type=int, default=19006)
-    parser.add_argument("--embodiment-manifest", type=Path, help="Shared embodiment training bundle (fixed 50k)")
+    parser.add_argument("--embodiment-manifest", type=Path, help="Shared embodiment training bundle (fixed 32k)")
     parser.add_argument("--seed-namespace", choices=("pilot", "final"), default="final")
     parser.add_argument("--episodes-per-channel", type=int, default=50)
     parser.add_argument("--max-attempts", type=int, default=100)

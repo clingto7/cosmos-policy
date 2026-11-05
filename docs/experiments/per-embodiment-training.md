@@ -1,6 +1,6 @@
 # Per-embodiment training and task-level evaluation
 
-This implements [ADR 0007](../adr/0007-per-embodiment-training-budget.md).
+This implements [ADR 0007](../adr/0007-per-embodiment-training-budget.md) and the revised budgets in [ADR 0008](../adr/0008-task-count-training-budget.md).
 The CPU data/config/checkpoint contracts can be exercised locally. Real model
 forward/backward and FSDP restore require the CUDA training environment. RGB
 Isaac Sim evaluation requires a supported RTX GPU, separately from the H100
@@ -63,21 +63,49 @@ python -m cosmos_policy.experiments.robot.bench2dex.train_embodiment \
   --run-name "$RUN_NAME"
 ```
 
-On the allocated GPU host, expose exactly two H100 GPUs with
+On the allocated GPU host, expose exactly the required H100 GPUs with
 `CUDA_VISIBLE_DEVICES`. Add `--smoke --execute` and use a separate run name for
 the four-update GPU proof (saves at updates 2 and 4). This checks the production
-microbatch/accumulation shape without launching 50k updates. Inspect finite
+microbatch/accumulation shape without launching 32k updates. Inspect finite
 loss/gradients, actual base-weight initialization and save/load before admitting
 the full run. For full training, omit `--smoke` and add `--execute`.
 
 After the smoke run completes, rerun its identical command with
-`--verify-restore --smoke --execute`. This forces a two-GPU model/optimizer/
+`--verify-restore --smoke --execute`. This forces a configured multi-GPU model/optimizer/
 scheduler/trainer reload at update 4 and exits without further optimizer updates.
 Without `--verify-restore`, an already-completed run exits before loading the model.
 
-Each full run uses microbatch 16 per GPU, accumulation 2, global batch 64 and
-50k optimizer updates. The existing optimizer and 30k learning-rate schedule
-boundary are preserved; the schedule is not stretched to 50k. Task selection
+The bundle selects one of three explicit launch scripts:
+
+| Tasks | Script | GPUs × microbatch × accumulation | Global batch | Steps | Total samples |
+| --- | --- | --- | --- | --- | --- |
+| 1 | [train_1_task.sh](../../bin/bench2dex/train_1_task.sh) | 2 × 16 × 2 | 64 | 32,000 | 2,048,000 |
+| 2 | [train_2_task.sh](../../bin/bench2dex/train_2_task.sh) | 4 × 16 × 2 | 128 | 32,000 | 4,096,000 |
+| 3 | [train_3_task.sh](../../bin/bench2dex/train_3_task.sh) | 8 × 12 × 2 | 192 | 32,000 | 6,144,000 |
+
+All three retain peak LR `1e-4`; no automatic batch-based LR scaling is applied.
+Warmup is `round(max_steps / 30)` (clamped to `[1, max_steps-1]`), followed by
+cosine decay to `6e-6` at `max_steps`, with no discontinuous second-stage drop.
+At 32k this gives 1,067 warmup updates. The standalone launcher accepts
+`--max-steps` for separate experiments; all dependent counts and LR durations
+follow it. The accepted production/final-evaluation protocol remains 32k.
+
+Set `PYTHON` to the existing Cosmos environment's Python, `CUDA_VISIBLE_DEVICES`
+to the exact GPU allocation, and export `MANIFEST`, `ROBOT_MAP`, `BASE_MODEL`,
+`TOKENIZER`, `OUTPUT`, and `RUN_NAME`. Then run the matching script, for example:
+
+```sh
+bash bin/bench2dex/train_2_task.sh             # print and review the frozen plan
+bash bin/bench2dex/train_2_task.sh --execute   # start/resume the 32k run
+```
+
+The scripts assert the bundle task count and reuse existing CUDA libraries; they
+install nothing. Use a separate `RUN_NAME` with `--smoke --execute` for a four-step
+proof, and the same smoke command plus `--verify-restore` for a reload-only proof.
+Smoke also shortens its dataset and LR horizon to four updates. It is never a
+production checkpoint or a continuation of the old 50k recipe.
+
+Task selection
 is uniform in expectation, followed by uniform valid-window selection within
 the task. Neither equal counts in every batch nor episode-uniform sampling is
 implied. All task samples retain their own standard prompt and embedding while
@@ -103,10 +131,12 @@ after the completion pointer matches, every component's metadata references
 existing complete shard byte ranges, and the serialized trainer iteration
 matches the directory, a `bench2dex-checkpoint.json` marker is written. Retention
 keeps the newest two validated checkpoints of this bundle and always preserves
-50k. Partial, unmarked, foreign and symlinked directories are not deleted.
+32k (and historical 50k finals). Partial, unmarked, foreign and symlinked directories are not deleted.
 Interrupted artifacts can therefore require later manual cleanup.
 
-The sampler resumes at `completed_updates * 64`, so worker prefetch cannot
+The final update is saved even when it is not divisible by 5k (32k saves after 30k).
+
+The sampler resumes at `completed_updates * global_batch`, so worker prefetch cannot
 advance the committed data position. Existing model RNG restoration is not
 extended; bitwise equivalence to uninterrupted CUDA training is not claimed.
 Storage validation checks completeness; real FSDP model/optimizer reload remains
@@ -117,9 +147,11 @@ part of the GPU proof. No periodic independent evaluation runs during training.
 Use the existing [final runner](bench2dex-final-evaluation.md) once per task,
 adding `--embodiment-manifest "$BUNDLE"`. Keep `--manifest` and `--embedding`
 pointed at that task's original audited artifacts. Use the same embodiment's
-`iter_000050000` checkpoint for all tasks in the group, and distinct evaluation
-output directories. The runner enforces the validated 50k checkpoint and records
-the bundle hash. Each invocation starts a new policy server.
+`iter_000032000` checkpoint for all tasks in the group, and distinct evaluation
+output directories. The runner enforces the validated 32k checkpoint and records
+the bundle hash. Each invocation starts a new policy server. The wrapper explicitly passes
+`--device cpu` to the simulator and records CPU physics; rendering and policy
+inference remain on GPU.
 
 The runtime verifies membership and artifact hashes, selects that task's fixed
 prompt/embedding, and uses shared statistics for both proprio normalization and
@@ -137,8 +169,9 @@ python -m cosmos_policy.experiments.robot.bench2dex.runtime \
 ```
 
 The standalone server accepts validated intermediate checkpoints for smoke
-verification. The final evaluation wrapper requires 50k. Existing per-task
-commands retain their original behavior when no embodiment bundle is supplied.
+verification. The final evaluation wrapper requires 32k. Existing per-task
+checkpoint selection remains unchanged when no embodiment bundle is supplied;
+the final runner selects CPU physics for both modes.
 
 ## CPU checks
 
@@ -152,7 +185,8 @@ python -m pytest -q \
   tests/test_bench2dex_contract.py \
   tests/test_bench2dex_runtime.py \
   tests/test_bench2dex_embodiment.py \
-  tests/test_bench2dex_checkpoint_retention.py
+  tests/test_bench2dex_checkpoint_retention.py \
+  tests/test_bench2dex_budget.py
 ```
 
 The checkpoint tests include real CPU DCP serialization and a two-rank Gloo
@@ -160,9 +194,75 @@ save with rank-zero-only validation. The existing conditioning/loss tests import
 the full model stack and should also run in the CUDA environment before a long
 training job.
 
-## Validation completed on 2026-11-05
+## Parameter audit and training observations
 
-Implementation revision `24fd6c0` was exercised with the actual audited task03
+`run-identity.json` records the budget, expected per-task exposure, scheduler
+parameters, base/tokenizer/data/code hashes and environment versions.
+`config.yaml` and `resolved-training.json` record the effective configuration,
+including inherited model, optimizer and callback settings.
+
+`metrics.jsonl` writes one `update` row per completed optimizer update:
+`loss` is the mean over every rank and both accumulated microbatches;
+`lr_used` is the LR that performed that update, while `lr_next` is the value
+installed by `scheduler.step()`. Torch LambdaLR initializes at index zero, so
+update k uses schedule(k-1), and the scheduler reaches its minimum after update
+`max_steps`. `samples_seen`, `task_samples_this_update` and `task_samples_seen`
+count actual consumed windows, not prefetched windows. `start` rows and session
+IDs mark restarts. When resuming, use the latest session plus the committed prefix
+through its starting checkpoint; do not sum replayed rows from abandoned attempts.
+The journal is flushed to disk before checkpoint saving. Missing matching metrics
+at resume are rejected rather than guessed.
+
+The audit distinguishes budget-sensitive and invariant settings:
+
+| Setting | Treatment |
+| --- | --- |
+| GPU count, microbatch, accumulation, global batch, stream length | Derived and cross-checked against bundle task count and `max_steps` |
+| Warmup and LR decay | Derived from `max_steps`; minimum held after the endpoint |
+| Sampler resume offset | Completed optimizer updates × global batch |
+| Checkpoints | Every 5k plus final; synchronous; latest two plus protected final |
+| Loss/LR/sample metrics | Every optimizer update, globally reduced; scheduler advances once per update |
+| Console/device monitoring | Existing 5-update interval; not a training horizon |
+| Periodic validation | Disabled; generation callback scheduled beyond the run budget |
+| Optimizer | Existing FusedAdamW, weight decay 0.1, betas (0.9, 0.99), epsilon 1e-8; peak LR 1e-4 |
+| Precision and clipping | Existing model precision and master weights; gradient scaler disabled; norm clipping 1.0 with nonfinite checks |
+| EMA | Disabled; no sample-dependent EMA schedule is active |
+| Context parallelism | One; GPUs are data-parallel ranks, checked against the recipe |
+| Tokenizer compilation | Existing startup optimization; not a budget or LR schedule |
+| Action horizon and control rate | 16 targets at 20Hz; unrelated to optimizer steps |
+| Image/noise/loss settings | Existing 224-resolution, four-view policy recipe; captured in the resolved config |
+
+Loss stability and a falling LR are diagnostics, not a substitute for task-level
+closed-loop evaluation. Historical per-task runs and their configuration are not
+modified by these changes.
+
+## Revised-budget validation status (2026-11-05)
+
+The final local CPU suite passed 43 tests plus three subtests; Ruff, shell syntax
+and whitespace checks also passed. Checks cover all three budgets, 2/4/8-way sampling partitions and resume
+offsets, the actual PyTorch LR scheduler state round-trip, partial metrics logs,
+launcher guards, and real DCP retention including preservation of the 32k final.
+The three shell entry points are exercised with paths containing spaces.
+
+An earlier snapshot of this change passed 46 tests plus three subtests in the
+remote Cosmos environment. A four-H100, GB128, four-update smoke was started in
+an isolated `embodiment-budget-v2-20261105` directory. The last observed log reached
+update 2 with finite gradients and a validated complete checkpoint. Its completion,
+new-schedule GPU restore, and CPU-physics simulator smoke are **not verified**.
+Local callback scheduling safeguards were tightened after that remote snapshot;
+its evidence does not validate the final source revision. Eight-GPU execution has
+not run. Earlier GPU/simulator proof below applies to the previous recipe only.
+
+The owner paused instance access during this phase. No further remote polling,
+cleanup, or workloads are performed until requested. Resume these hardware checks
+before declaring the new production recipes fully validated.
+
+## Historical validation completed on 2026-11-05
+
+This evidence predates ADR 0008 and does not validate the revised budgets.
+
+
+Historical implementation revision `24fd6c0` was exercised with the actual audited task03
 and task79 datasets (100 episodes each), sharing `multi_xarm7_with_ability`.
 
 | Check | Result |

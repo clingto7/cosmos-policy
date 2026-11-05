@@ -2,6 +2,9 @@
 
 On 2026-11-05, the owner chose one multi-task checkpoint per Bench2Dex embodiment, following Bench2Dex's existing task grouping, with two H100 GPUs, microbatch 16 per GPU, gradient accumulation 2, global batch 64, and 50,000 optimizer updates per embodiment. The budget balances the owner's earlier per-task learning results at batch 64 and 25k updates against acceptable training time; it is a fixed budget, not a claim of multi-task convergence or equal per-task exposure.
 
+> Budget superseded on 2026-11-05 by [ADR 0008](0008-task-count-training-budget.md).
+> The shared data, normalization and task-conditioning decisions remain in effect.
+
 ## Accepted decisions
 
 - Follow Bench2Dex's physical embodiment grouping, identified by `meta/robot_key`. Train one checkpoint per embodiment, including the single-task groups. Use the same original Video2World base weights for every group.

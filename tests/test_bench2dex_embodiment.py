@@ -113,7 +113,7 @@ def test_uniform_tasks_despite_unequal_lengths_and_reproducible_resume():
         assert [dataset.locate(i) for i in after[:20]] == [dataset.locate(i) for i in before[rank][544:564]]
         sampler.set_start_iteration(300)
         assert len(sampler) == 0 and list(sampler) == []
-    with pytest.raises(ValueError, match="two data-parallel"):
+    with pytest.raises(ValueError, match="2/4/8 data-parallel"):
         EmbodimentSampler(dataset, 1, 0)
 
 
@@ -178,7 +178,7 @@ def test_runtime_loads_shared_stats_and_rejects_task_or_embedding_mismatch(prepa
     assert file_hash(args.embedding) != bundle["tasks"][1]["embedding_sha256"]
 
 
-def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared):
+def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, monkeypatch):
     from pathlib import Path
 
     from cosmos_policy._src.imaginaire.lazy_config import LazyDict, instantiate
@@ -199,11 +199,16 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared):
     assert original["dataloader_train"]["dataset"] == "per-task"
     assert recipe["dataloader_train"]["batch_size"] == 16
     assert recipe["trainer"]["grad_accum_iter"] == 2
-    assert recipe["trainer"]["max_iter"] == 50000
+    assert recipe["trainer"]["max_iter"] == 32000
     assert recipe["trainer"]["run_validation"] is False
+    for name in ("every_n_sample_reg", "every_n_sample_ema"):
+        assert recipe["trainer"]["callbacks"][name]["every_n"] == 32001
+        assert recipe["trainer"]["callbacks"][name]["run_at_start"] is False
     assert recipe["checkpoint"]["save_iter"] == 5000
     assert recipe["checkpoint"]["dcp_async_mode_enabled"] is False
-    assert recipe["scheduler"] == original["scheduler"]
+    assert recipe["scheduler"]["cycle_lengths"] == [32000, 32000]
+    assert original["scheduler"]["cycle_lengths"][0] == 30000
+    assert len(dataset) == 128 * 32000
     weights, tokenizer = prepared.root / "base.pt", prepared.root / "tokenizer.pth"
     weights.write_bytes(b"test-weight-identity")
     tokenizer.write_bytes(b"test-tokenizer-identity")
@@ -218,9 +223,22 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared):
         smoke=False,
     )
     command, identity, run_dir = plan_run(args)
-    assert identity["global_batch"] == 64 and identity["max_iter"] == 50000
-    assert "--nproc_per_node=2" in command and "checkpoint.save_iter=5000" in command
+    assert identity["global_batch"] == 128 and identity["max_iter"] == 32000
+    assert "--nproc_per_node=4" in command and "checkpoint.save_iter=5000" in command
     assert not args.output.exists() and run_dir.name == "test-run"
+    args.max_steps = 12000
+    _, shorter, _ = plan_run(args)
+    assert shorter["total_samples"] == 128 * 12000
+    assert shorter["scheduler"]["cycle_lengths"] == [12000, 12000]
+    monkeypatch.setenv("BENCH2DEX_MAX_STEPS", "12000")
+    shorter_recipe = make_embodiment_experiment(original, str(prepared.bundle), str(prepared.robot_map), "test_robot")
+    assert shorter_recipe["dataloader_train"]["dataset"]["total_samples"] == 128 * 12000
+    assert shorter_recipe["scheduler"]["warm_up_steps"] == [400, 0]
+    assert shorter_recipe["trainer"]["max_iter"] == 12000
+    args.expected_tasks = 3
+    with pytest.raises(ValueError, match="task count"):
+        plan_run(args)
+    args.expected_tasks = 2
     args.smoke = True
     _, smoke_identity, _ = plan_run(args)
     assert smoke_identity["max_iter"] == 4 and smoke_identity != identity
@@ -281,7 +299,7 @@ def test_launcher_idempotence_restore_probe_and_run_identity(prepared, monkeypat
         verify_restore=False,
     )
     command, identity, run_dir = launcher.plan_run(args)
-    monkeypatch.setattr(launcher, "check_training_devices", lambda smoke: None)
+    monkeypatch.setattr(launcher, "check_training_devices", lambda smoke, world_size: None)
     launches = []
 
     def simulate_worker(command, **kwargs):

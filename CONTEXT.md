@@ -1,10 +1,10 @@
 # Cosmos Policy on Bench2Dex
 
-This context defines the robot data and evaluation language used to adapt Cosmos Policy to Bench2Dex. The planned per-embodiment mode is defined in [ADR 0007](docs/adr/0007-per-embodiment-training-budget.md).
+This context defines the robot data and evaluation language used to adapt Cosmos Policy to Bench2Dex. The per-embodiment data contract is defined in [ADR 0007](docs/adr/0007-per-embodiment-training-budget.md); current 1/2/3-task budgets, budget-bound LR and CPU physics are defined in [ADR 0008](docs/adr/0008-task-count-training-budget.md).
 
 ## Current batch workflow
 
-New per-task runs follow [ADR 0006](docs/adr/0006-fixed-budget-two-gpu-batch.md)
+Historical per-task runs followed [ADR 0006](docs/adr/0006-fixed-budget-two-gpu-batch.md)
 and the [fixed-budget workflow](docs/experiments/fixed-budget-batch.md): two H100
 GPUs, global batch 64, 25k optimizer updates, full saves every 5k, fixed 25k
 selection, and 200 final episodes per task without a separate pilot. Issue #10 owns

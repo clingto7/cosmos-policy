@@ -63,3 +63,91 @@ class EmbodimentCheckpointCallback(Callback):
         if distributed.is_rank0():
             removed = mark_and_prune(self.trainer.checkpointer.save_dirname, iteration, self.manifest_path)
             log.info(f"Validated embodiment checkpoint {iteration}; removed {removed}")
+
+
+class EmbodimentMetricsCallback(Callback):
+    """Reduce loss over all ranks/microbatches and journal every optimizer update."""
+
+    def __init__(self, task_ids):
+        self.task_ids = list(task_ids)
+        self.losses = []
+        self.counts = dict.fromkeys(self.task_ids, 0)
+        self.journal = None
+
+    def on_train_start(self, model, iteration=0):
+        import json
+        from pathlib import Path
+
+        from omegaconf import OmegaConf
+
+        from cosmos_policy._src.imaginaire.utils import distributed
+        from cosmos_policy.experiments.robot.bench2dex.budget import Budget
+        from cosmos_policy.experiments.robot.bench2dex.metrics import MetricsJournal
+
+        self.budget = Budget(len(self.task_ids), self.config.trainer.max_iter)
+        root = Path(self.config.job.path_local)
+        identity = json.loads((root / "run-identity.json").read_text())
+        for key, value in self.budget.to_dict().items():
+            if identity.get(key) != value:
+                raise ValueError(f"resolved budget differs from launch identity: {key}")
+        expected = self.budget.scheduler()
+        for key, value in expected.items():
+            if list(self.config.scheduler[key]) != value:
+                raise ValueError(f"resolved scheduler differs from budget: {key}")
+        if (
+            self.config.optimizer.lr != identity["peak_lr"]
+            or self.config.trainer.grad_accum_iter != 2
+            or self.config.dataloader_train.batch_size != self.budget.microbatch
+            or self.config.dataloader_train.dataset.total_samples != self.budget.total_samples
+            or distributed.get_world_size() != self.budget.world_size
+            or self.config.trainer.grad_scaler_args.get("enabled", False)
+        ):
+            raise ValueError("resolved optimizer/data/distributed configuration differs from identity")
+        if distributed.is_rank0():
+
+            def serialize(value):
+                if OmegaConf.is_config(value):
+                    return OmegaConf.to_container(value, resolve=True)
+                return str(value)
+
+            (root / "resolved-training.json").write_text(json.dumps(self.config.to_dict(), default=serialize, indent=2))
+            self.journal = MetricsJournal(root / "metrics.jsonl", self.task_ids, self.budget.global_batch, iteration)
+
+    def on_training_step_batch_start(self, model, data_batch, iteration=0):
+        for task_id in data_batch["task_id"]:
+            self.counts[task_id] += 1
+
+    def on_before_backward(self, model_ddp, loss, iteration=0):
+        self.losses.append(loss.detach().double())
+
+    def on_before_optimizer_step(self, model, optimizer, scheduler, grad_scaler, iteration=0):
+        self.lr_used = [float(group["lr"]) for group in optimizer.param_groups]
+
+    def on_before_zero_grad(self, model, optimizer, scheduler, iteration=0):
+        import torch.distributed as dist
+
+        if len(self.losses) != self.budget.grad_accum_iter:
+            raise ValueError("loss accumulation does not match optimizer update")
+        values = torch.stack(
+            [sum(self.losses), *[self.losses[0].new_tensor(self.counts[task_id]) for task_id in self.task_ids]]
+        )
+        dist.all_reduce(values)
+        values = values.tolist()
+        if self.journal is not None:
+            self.journal.update(
+                iteration + 1,
+                values[0] / (self.budget.world_size * self.budget.grad_accum_iter),
+                self.lr_used,
+                [float(g["lr"]) for g in optimizer.param_groups],
+                dict(zip(self.task_ids, (int(v) for v in values[1:]))),
+            )
+        self.losses.clear()
+        self.counts = dict.fromkeys(self.task_ids, 0)
+
+    def on_save_checkpoint_start(self, model, iteration=0):
+        if self.journal is not None:
+            self.journal.sync()
+
+    def on_train_end(self, model, iteration=0):
+        if self.journal is not None:
+            self.journal.sync()

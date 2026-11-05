@@ -1,5 +1,7 @@
 # Bench2Dex final evaluation for a selected Cosmos checkpoint
 
+The runner explicitly selects CPU physics (`--device cpu`); RGB rendering and policy inference still use GPU. New per-embodiment runs use the fixed 32k checkpoint under [ADR 0008](../adr/0008-task-count-training-budget.md).
+
 Select a checkpoint using pilot seeds first. The final runner evaluates that fixed checkpoint on `none`, `cov_only`, `inv_only`, and `inv_cov`, with 50 episodes in each channel. The first three channels use the same task `replay-generalization` anchor directory; `inv_cov` uses independent samples. It uses Bench2Dex seed namespaces `100000000` and `200000000` (Full) and computes the episode limit from the scene's expert time at 1.5×. For example, task03 has 2164 expert physics steps and a 1082 policy-step limit; task06 has 1280 and a 640 policy-step limit. The earlier 1200-step pilots are not final comparisons.
 
 For checkpoint comparison or runner validation, pass `--seed-namespace pilot`. This uses `300000000` for the anchor channels and `400000000` for Full. The task03 20k–50k training-budget curve uses 50 episodes per channel for every checkpoint. A shorter smoke check may use `--episodes-per-channel 10`, but its wider uncertainty makes it unsuitable for this curve. Put pilot and final runs in separate output directories. Final runs always require 50 episodes per channel, and the aggregator rejects pilot results as official final scores.

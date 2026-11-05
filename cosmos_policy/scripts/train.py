@@ -68,10 +68,20 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         # We intentionally instantiate the dataloader on every process (rather than the rank 0 process only) to work with the DistributedSampler.
         dataset = instantiate(config.dataloader_train.dataset)
         if isinstance(dataset, EmbodimentDataset):
-            if config.dataloader_train.batch_size != 16 or config.trainer.grad_accum_iter != 2:
-                raise ValueError("per-embodiment training requires microbatch 16 and accumulation 2")
+            from cosmos_policy.experiments.robot.bench2dex.budget import Budget
+
+            budget = Budget(len(dataset.task_ids), config.trainer.max_iter)
+            if (
+                config.dataloader_train.batch_size != budget.microbatch
+                or config.trainer.grad_accum_iter != budget.grad_accum_iter
+                or parallel_state.get_data_parallel_world_size() != budget.world_size
+                or len(dataset) != budget.total_samples
+            ):
+                raise ValueError(
+                    "per-embodiment training budget, dataset length and distributed configuration disagree"
+                )
             sampler = EmbodimentSampler(
-                dataset, parallel_state.get_data_parallel_world_size(), parallel_state.get_data_parallel_rank()
+                dataset, budget.world_size, parallel_state.get_data_parallel_rank(), budget.global_batch
             )
         else:
             sampler = DistributedSampler(

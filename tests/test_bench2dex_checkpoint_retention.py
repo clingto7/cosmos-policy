@@ -44,11 +44,15 @@ def test_only_two_verified_checkpoints_retained_and_partial_saves_untouched(tmp_
     assert recover_checkpoint(root, manifest) == checkpoint
     assert partial.exists()
     # A final checkpoint is never removed, even if a later experiment is accidentally admitted.
-    final = save_checkpoint(root, 50000)
-    mark_and_prune(root, 50000, manifest)
+    final = save_checkpoint(root, 32000)
+    mark_and_prune(root, 32000, manifest)
     require_checkpoint_contract(final, manifest, final=True)
-    with pytest.raises(ValueError, match="fixed 50k"):
+    with pytest.raises(ValueError, match="fixed 32k"):
         require_checkpoint_contract(checkpoint, manifest, final=True)
+    for later in (35000, 40000, 45000):
+        save_checkpoint(root, later)
+        mark_and_prune(root, later, manifest)
+    assert final.exists()
 
 
 def test_truncated_shard_blocks_retention_and_falls_back(tmp_path):

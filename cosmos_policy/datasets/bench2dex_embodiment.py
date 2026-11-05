@@ -18,7 +18,6 @@ from cosmos_policy.datasets.bench2dex_dataset import CAMERAS, CHUNK_SIZE, Bench2
 from cosmos_policy.datasets.bench2dex_training import resolve_bench2dex_audit_config
 
 SCHEMA = "bench2dex-embodiment-v1"
-UPDATES = 50_000
 GLOBAL_BATCH = 64
 
 
@@ -147,12 +146,16 @@ class EmbodimentDataset:
     Task probabilities are equal in expectation, not forced within each batch.
     """
 
-    def __init__(self, datasets, task_ids, *, seed=0, total_samples=UPDATES * GLOBAL_BATCH):
+    def __init__(self, datasets, task_ids, *, seed=0, total_samples=None):
         if not datasets or any(len(dataset) == 0 for dataset in datasets):
             raise ValueError("all tasks need valid training windows")
         if len(datasets) != len(task_ids) or len(set(task_ids)) != len(task_ids):
             raise ValueError("datasets require distinct task IDs")
         self.datasets, self.task_ids = list(datasets), list(task_ids)
+        if total_samples is None:
+            from cosmos_policy.experiments.robot.bench2dex.budget import Budget
+
+            total_samples = Budget(len(task_ids)).total_samples
         self.seed, self.total_samples = int(seed), int(total_samples)
         if self.seed < 0 or self.total_samples <= 0:
             raise ValueError("invalid sampling seed or budget")
@@ -179,10 +182,10 @@ class EmbodimentSampler:
     """Shard draw IDs across ranks; resume at completed_updates * global_batch."""
 
     def __init__(self, dataset, num_replicas, rank, global_batch=GLOBAL_BATCH):
-        if num_replicas != 2 or not 0 <= rank < num_replicas:
-            raise ValueError("per-embodiment training requires two data-parallel ranks")
-        if global_batch != GLOBAL_BATCH or len(dataset) % global_batch:
-            raise ValueError("sampler requires complete global batches of 64")
+        if num_replicas not in (2, 4, 8) or not 0 <= rank < num_replicas:
+            raise ValueError("per-embodiment training requires 2/4/8 data-parallel ranks")
+        if global_batch != {2: 64, 4: 128, 8: 192}[num_replicas] or len(dataset) % global_batch:
+            raise ValueError("sampler requires complete global batches matching the GPU recipe")
         self.dataset, self.num_replicas, self.rank = dataset, num_replicas, rank
         self.global_batch, self.start = global_batch, 0
 
@@ -202,12 +205,14 @@ class EmbodimentSampler:
         return (len(self.dataset) - self.start) // self.num_replicas
 
 
-def load_embodiment_dataset(
-    manifest_path: str, robot_map_path: str, chunk_size=CHUNK_SIZE, seed=0, total_samples=UPDATES * GLOBAL_BATCH
-):
+def load_embodiment_dataset(manifest_path: str, robot_map_path: str, chunk_size=CHUNK_SIZE, seed=0, total_samples=None):
     if chunk_size != CHUNK_SIZE:
         raise ValueError("Bench2Dex requires 16-step actions")
     bundle, profile, stats = read_bundle(manifest_path, robot_map_path)
+    if total_samples is None:
+        from cosmos_policy.experiments.robot.bench2dex.budget import Budget
+
+        total_samples = Budget(len(bundle["tasks"])).total_samples
     datasets, shapes = [], set()
     for task in bundle["tasks"]:
         embedding = load_embedding(task, Path(manifest_path).parent)

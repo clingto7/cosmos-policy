@@ -1,4 +1,4 @@
-"""Plan or execute a two-GPU embodiment run with frozen inputs and safe resume."""
+"""Plan or execute a budgeted embodiment run with frozen inputs and safe resume."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from cosmos_policy.datasets.bench2dex_embodiment import load_embedding, read_bundle
+from cosmos_policy.experiments.robot.bench2dex.budget import Budget
 from cosmos_policy.experiments.robot.bench2dex.checkpoints import (
     MARKER,
     atomic_json,
@@ -58,14 +59,19 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         load_embedding(task, args.manifest.parent)
     check_output_path(args.output)
     run_dir = args.output.resolve() / "cosmos_policy" / "bench2dex_embodiment" / args.run_name
-    max_iter, save_iter = (4, 2) if args.smoke else (50000, 5000)
+    max_iter = 4 if args.smoke else getattr(args, "max_steps", 32000)
+    save_iter = 2 if args.smoke else 5000
+    budget = Budget(len(bundle["tasks"]), max_iter)
+    expected = getattr(args, "expected_tasks", None)
+    if expected is not None and expected != budget.task_count:
+        raise ValueError("script task count differs from the complete embodiment bundle")
     experiment = f"cosmos_predict2_2b_480p_bench2dex_{profile.robot_key}"
     command = [
         sys.executable,
         "-m",
         "torch.distributed.run",
         "--standalone",
-        "--nproc_per_node=2",
+        f"--nproc_per_node={budget.world_size}",
         "-m",
         "cosmos_policy.scripts.train",
         "--config=cosmos_policy/config/config.py",
@@ -76,12 +82,12 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         "job.group=bench2dex_embodiment",
         f"trainer.max_iter={max_iter}",
         "trainer.grad_accum_iter=2",
-        "dataloader_train.batch_size=16",
+        f"dataloader_train.batch_size={budget.microbatch}",
         f"checkpoint.save_iter={save_iter}",
         "checkpoint.dcp_async_mode_enabled=false",
     ]
     identity = {
-        "schema": "bench2dex-embodiment-run-v1",
+        "schema": "bench2dex-embodiment-run-v2",
         "mode": "smoke" if args.smoke else "train",
         "manifest_sha256": file_hash(args.manifest),
         "robot_map_sha256": file_hash(args.robot_map),
@@ -91,10 +97,8 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         "environment": environment_versions(),
         "robot_key": profile.robot_key,
         "task_ids": [t["task_id"] for t in bundle["tasks"]],
-        "world_size": 2,
-        "microbatch": 16,
-        "grad_accum_iter": 2,
-        "global_batch": 64,
+        **budget.to_dict(),
+        "scheduler": budget.scheduler(),
         "max_iter": max_iter,
         "save_iter": save_iter,
         "sampler_seed": 0,
@@ -127,17 +131,17 @@ def recover_checkpoint(root: Path, manifest: Path):
     return valid[0]
 
 
-def check_training_devices(smoke: bool):
+def check_training_devices(smoke: bool, world_size: int):
     import torch
 
-    if not torch.cuda.is_available() or torch.cuda.device_count() != 2:
-        raise ValueError("expose exactly two CUDA GPUs using CUDA_VISIBLE_DEVICES")
-    if not smoke and any("H100" not in torch.cuda.get_device_name(rank) for rank in range(2)):
-        raise ValueError("the fixed-budget production recipe requires two H100 GPUs")
+    if not torch.cuda.is_available() or torch.cuda.device_count() != world_size:
+        raise ValueError(f"expose exactly {world_size} CUDA GPUs using CUDA_VISIBLE_DEVICES")
+    if not smoke and any("H100" not in torch.cuda.get_device_name(rank) for rank in range(world_size)):
+        raise ValueError("the fixed-budget production recipe requires H100 GPUs")
 
 
 def execute_run(args, command, identity, run_dir):
-    check_training_devices(args.smoke)
+    check_training_devices(args.smoke, identity["world_size"])
     run_dir.mkdir(parents=True, exist_ok=True)
     with (run_dir / "launch.lock").open("a") as lock:
         # The child inherits this lock, so killing the launcher cannot admit a duplicate run.
@@ -171,6 +175,7 @@ def execute_run(args, command, identity, run_dir):
         environment.update(
             BENCH2DEX_EMBODIMENT_MANIFEST=str(args.manifest),
             BENCH2DEX_ROBOT_MAP=str(args.robot_map),
+            BENCH2DEX_MAX_STEPS=str(identity["max_iter"]),
             COSMOS_POLICY_PRETRAINED_CHECKPOINT=str(args.base_model),
             COSMOS_POLICY_TOKENIZER_CHECKPOINT=str(args.tokenizer),
             IMAGINAIRE_OUTPUT_ROOT=str(args.output),
@@ -192,6 +197,10 @@ def main():
         parser.add_argument("--" + name, type=lambda p: Path(p).expanduser().resolve(), required=True)
     parser.add_argument("--repo", type=lambda p: Path(p).resolve(), default=Path(__file__).resolve().parents[4])
     parser.add_argument("--run-name", required=True)
+    parser.add_argument("--max-steps", type=int, default=32000)
+    parser.add_argument(
+        "--expected-tasks", type=int, choices=(1, 2, 3), help="Guard the selected script against a wrong bundle"
+    )
     parser.add_argument(
         "--smoke", action="store_true", help="Isolated 4-update/2-save GPU proof; use a separate run name"
     )
@@ -199,7 +208,7 @@ def main():
     parser.add_argument(
         "--verify-restore",
         action="store_true",
-        help="Reload a completed run's full state on two GPUs without additional optimizer updates",
+        help="Reload a completed run's full state on the configured GPUs without additional optimizer updates",
     )
     args = parser.parse_args()
     command, identity, run_dir = plan_run(args)

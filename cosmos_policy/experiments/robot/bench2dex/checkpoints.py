@@ -91,8 +91,8 @@ def require_checkpoint_contract(checkpoint: str | Path, manifest_path: str | Pat
     actual = validate_checkpoint(checkpoint)
     if any(marker[key] != actual[key] for key in ("iteration", "components")):
         raise ValueError("checkpoint changed after validation")
-    if final and actual["iteration"] != 50_000:
-        raise ValueError("per-embodiment final evaluation requires the fixed 50k checkpoint")
+    if final and actual["iteration"] != 32_000:
+        raise ValueError("per-embodiment final evaluation requires the fixed 32k checkpoint")
     return marker
 
 
@@ -123,7 +123,8 @@ def mark_and_prune(root: str | Path, iteration: int, manifest_path: str | Path) 
         require_checkpoint_contract(path, manifest_path)
     removed = []
     for path in candidates[:-2]:
-        if path.name == "iter_000050000":
+        if path.name in ("iter_000032000", "iter_000050000"):
+            # Preserve historical final artifacts as well as the current final budget.
             continue
         require_checkpoint_contract(path, manifest_path)
         shutil.rmtree(path)

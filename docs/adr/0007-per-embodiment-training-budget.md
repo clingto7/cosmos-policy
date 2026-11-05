@@ -23,3 +23,5 @@ The owner chose to try uniform sampling and 50k first. Additional training beyon
 In the local Bench2Dex checkout, `policy/GR00T_CE/configs/embodiments.yaml` registers the 12 physical embodiments and `policy/GR00T_XE/xe_norm_stats.taskstats.json` records the existing 26-task grouping. `policy/GR00T_CE/data/discovery.py` derives identity from HDF5 metadata; `robots/active_dof_maps.yml` supplies the joint contract. These existing definitions guide grouping; actual training manifests must still validate robot identity and joint ordering. Scene filenames and action dimensions are not embodiment identities.
 
 This decision scopes the planned per-embodiment training mode and replaces per-task isolation and statistics from ADR 0001 for that mode. Existing per-task runs and ADR 0006's historical protocol remain unchanged. Implementation and job launch are not authorized by this record.
+
+Implementation commands, recovery semantics and GPU verification gates are documented in the [per-embodiment workflow](../experiments/per-embodiment-training.md).

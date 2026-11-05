@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import h5py
 import numpy as np
-import cv2
 
 from cosmos_policy.datasets.bench2dex_audit import audit_task, load_sha256sum, sha256_file
 from cosmos_policy.datasets.bench2dex_dataset import (
@@ -21,7 +21,6 @@ from cosmos_policy.datasets.bench2dex_dataset import (
     inspect_episode,
 )
 from cosmos_policy.datasets.bench2dex_training import load_bench2dex_training_dataset
-
 
 PROFILE = RobotProfile(
     "test_robot",
@@ -79,7 +78,7 @@ class Bench2DexContractTest(unittest.TestCase):
             write_episode(template)
             for index in range(100):
                 (source / f"episode_{index:06d}.hdf5").hardlink_to(template)
-            manifest, _ = audit_task(source, source, PROFILE, DESCRIPTION)
+            manifest, _ = audit_task(source, source, PROFILE, DESCRIPTION, task_id="03")
             manifest_path = directory / "manifest.json"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             robot_map = directory / "robots.yml"
@@ -126,7 +125,7 @@ class Bench2DexContractTest(unittest.TestCase):
             self.assertEqual(info.usable_frames, 17)
             self.assertEqual(info.excluded_frames, 2)
             self.assertEqual(info.unusable_task_frames, 1)
-            manifest, stats = audit_task(root, root, PROFILE, DESCRIPTION, expected_count=1)
+            manifest, stats = audit_task(root, root, PROFILE, DESCRIPTION, expected_count=1, task_id="03")
             self.assertTrue(manifest["ready"])
             self.assertIsNotNone(stats)
             dataset = Bench2DexDataset([path], PROFILE, DESCRIPTION, image_size=4, statistics=stats)
@@ -240,7 +239,7 @@ class Bench2DexContractTest(unittest.TestCase):
             write_episode(path)
             with h5py.File(path, "r+") as file:
                 file["meta/instruction"][()] = "A different task."
-            manifest, statistics = audit_task(root, root, PROFILE, DESCRIPTION, expected_count=1)
+            manifest, statistics = audit_task(root, root, PROFILE, DESCRIPTION, expected_count=1, task_id="03")
             self.assertTrue(manifest["ready"])
             self.assertIsNotNone(statistics)
             self.assertEqual(manifest["entries"][0]["usable_frames"], 17)
@@ -260,7 +259,7 @@ class Bench2DexContractTest(unittest.TestCase):
                 name = f"episode_{index:06d}.hdf5"
                 (source / name).hardlink_to(template)
                 (reference / name).hardlink_to(template)
-            manifest, stats = audit_task(source, reference, PROFILE, DESCRIPTION)
+            manifest, stats = audit_task(source, reference, PROFILE, DESCRIPTION, task_id="03")
             self.assertTrue(manifest["ready"])
             self.assertEqual(manifest["source_count"], 100)
             self.assertEqual(manifest["matched_count"], 100)
@@ -268,7 +267,7 @@ class Bench2DexContractTest(unittest.TestCase):
             self.assertEqual(stats.active_joint_names, ("joint_a", "joint_b"))
             np.testing.assert_allclose(stats.denormalize_actions(stats.normalize_actions([1, 101])), [1, 101])
 
-            candidate, candidate_stats = audit_task(source, None, PROFILE, DESCRIPTION)
+            candidate, candidate_stats = audit_task(source, None, PROFILE, DESCRIPTION, task_id="03")
             self.assertTrue(candidate["source_valid"])
             self.assertFalse(candidate["ready"])
             self.assertEqual(candidate["matched_count"], 0)
@@ -286,6 +285,7 @@ class Bench2DexContractTest(unittest.TestCase):
                 DESCRIPTION,
                 yk_hashes=load_sha256sum(checksum_file),
                 yk_location="host:/yk/task03",
+                task_id="03",
             )
             self.assertTrue(remote["ready"])
             self.assertEqual(remote["yk_reference_kind"], "remote_sha256sum")
@@ -295,7 +295,7 @@ class Bench2DexContractTest(unittest.TestCase):
             drifted = reference / "episode_000099.hdf5"
             drifted.unlink()
             write_episode(drifted, homing=17)
-            manifest, stats = audit_task(source, reference, PROFILE, DESCRIPTION)
+            manifest, stats = audit_task(source, reference, PROFILE, DESCRIPTION, task_id="03")
             self.assertFalse(manifest["ready"])
             self.assertEqual(manifest["matched_count"], 99)
             self.assertTrue(manifest["source_valid"])

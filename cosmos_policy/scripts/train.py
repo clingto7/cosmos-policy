@@ -35,6 +35,7 @@ from cosmos_policy._src.imaginaire.utils import distributed
 from cosmos_policy._src.imaginaire.utils.context_managers import data_loader_init, distributed_init, model_init
 from cosmos_policy._src.imaginaire.utils.launch import log_reproducible_setup
 from cosmos_policy._src.predict2.utils.model_loader import create_model_from_consolidated_checkpoint_with_fsdp
+from cosmos_policy.datasets.bench2dex_embodiment import EmbodimentDataset, EmbodimentSampler
 
 
 @logging.catch(reraise=True)
@@ -66,13 +67,20 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         # since it is difficult to set up the DistributedSampler without creating two duplicates of the dataset.
         # We intentionally instantiate the dataloader on every process (rather than the rank 0 process only) to work with the DistributedSampler.
         dataset = instantiate(config.dataloader_train.dataset)
-        sampler = DistributedSampler(
-            dataset=dataset,
-            num_replicas=parallel_state.get_data_parallel_world_size(),
-            rank=parallel_state.get_data_parallel_rank(),
-            shuffle=True,
-            seed=0,
-        )
+        if isinstance(dataset, EmbodimentDataset):
+            if config.dataloader_train.batch_size != 16 or config.trainer.grad_accum_iter != 2:
+                raise ValueError("per-embodiment training requires microbatch 16 and accumulation 2")
+            sampler = EmbodimentSampler(
+                dataset, parallel_state.get_data_parallel_world_size(), parallel_state.get_data_parallel_rank()
+            )
+        else:
+            sampler = DistributedSampler(
+                dataset=dataset,
+                num_replicas=parallel_state.get_data_parallel_world_size(),
+                rank=parallel_state.get_data_parallel_rank(),
+                shuffle=True,
+                seed=0,
+            )
         dataloader_train = DataLoader(
             dataset=dataset,
             sampler=sampler,

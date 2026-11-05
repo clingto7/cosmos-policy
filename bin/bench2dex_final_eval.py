@@ -13,12 +13,11 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import socket
 import subprocess
 import time
-
+from pathlib import Path
 
 CHANNELS = ("none", "cov_only", "inv_only", "inv_cov")
 FINAL_SEED = 100_000_000
@@ -178,6 +177,15 @@ def run(args: argparse.Namespace) -> None:
     manifest = json.loads(args.manifest.read_text())
     if not manifest.get("ready") or manifest.get("task_id") != args.task_id:
         fail("task manifest is not ready or task ID differs")
+    embodiment_manifest = getattr(args, "embodiment_manifest", None)
+    if embodiment_manifest:
+        # Validate using the policy environment, which owns numpy/torch/DCP.
+        subprocess.run([
+            str(args.policy_python), "-c",
+            "import sys; from cosmos_policy.experiments.robot.bench2dex.checkpoints import require_checkpoint_contract; "
+            "require_checkpoint_contract(sys.argv[1], sys.argv[2], final=True)",
+            str(args.checkpoint), str(embodiment_manifest),
+        ], cwd=args.policy_repo, check=True)
     if not args.checkpoint.joinpath("model", ".metadata").is_file():
         fail("checkpoint model metadata missing")
     if not args.anchor_dir.is_dir():
@@ -230,6 +238,9 @@ def run(args: argparse.Namespace) -> None:
         "seed_pair": list(seed_pair),
     }
     protocol_file = args.output / "protocol.json"
+    if embodiment_manifest:
+        protocol["embodiment_manifest_sha256"] = file_sha256(embodiment_manifest)
+        protocol["training_scope"] = "embodiment"
     if protocol_file.exists() and json.loads(protocol_file.read_text()) != protocol:
         fail("existing output was created with a different protocol")
     protocol_file.write_text(json.dumps(protocol, indent=2) + "\n")
@@ -247,6 +258,8 @@ def run(args: argparse.Namespace) -> None:
         "--robot-map", str(args.robot_map), "--embedding", str(args.embedding),
         "--task-id", args.task_id, "--checkpoint-id", args.checkpoint_id,
         "--host", "127.0.0.1", "--port", str(args.port), "--seed", "7"]
+    if embodiment_manifest:
+        command.extend(["--embodiment-manifest", str(embodiment_manifest)])
     environment = os.environ.copy()
     environment.update(COSMOS_INTERNAL="1", CUDA_HOME=str(args.policy_python.parent.parent), PYTHONUNBUFFERED="1",
         COSMOS_POLICY_PRETRAINED_CHECKPOINT=str(args.base_model),
@@ -331,6 +344,7 @@ def main() -> None:
                  "policy-repo", "bench-repo", "policy-python", "sim-python", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--port", type=int, default=19006)
+    parser.add_argument("--embodiment-manifest", type=Path, help="Shared embodiment training bundle (fixed 50k)")
     parser.add_argument("--seed-namespace", choices=("pilot", "final"), default="final")
     parser.add_argument("--episodes-per-channel", type=int, default=50)
     parser.add_argument("--max-attempts", type=int, default=100)

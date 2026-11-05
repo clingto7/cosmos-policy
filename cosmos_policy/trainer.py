@@ -67,6 +67,8 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         self.callbacks.on_optimizer_init_end()
         # Load the model checkpoint and get the starting iteration number.
         iteration = self.checkpointer.load(model, optimizer, scheduler, grad_scaler)
+        if hasattr(dataloader_train.sampler, "set_start_iteration"):
+            dataloader_train.sampler.set_start_iteration(iteration)
         grad_accum_iter = 0
         log.critical(f"Distributed parallelism mode: {self.config.trainer.distributed_parallelism}")
         if self.config.trainer.distributed_parallelism == "ddp":
@@ -88,7 +90,7 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
             maybe_enable_memory_snapshot(self.config, global_step=iteration) as memory_profiler,
         ):
             epoch = 0
-            while True:
+            while iteration < self.config.trainer.max_iter:
                 dataloader_train.sampler.set_epoch(epoch)
                 dataloader_train_iter = iter(dataloader_train)
                 while True:

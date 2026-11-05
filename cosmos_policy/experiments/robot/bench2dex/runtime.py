@@ -354,6 +354,21 @@ def _load_inputs(args: argparse.Namespace) -> tuple[RobotProfile, TaskStatistics
         urdf_rel = robot_entry.get("urdf_path", "").replace("Bench2Dex/", "", 1)
         profile = profile_with_urdf_mimics(profile, base / urdf_rel, mimic_count)
     statistics = TaskStatistics.from_dict(manifest["statistics"])
+    embodiment_manifest = getattr(args, "embodiment_manifest", None)
+    from cosmos_policy.experiments.robot.bench2dex.checkpoints import MARKER, file_hash, require_checkpoint_contract
+
+    if embodiment_manifest:
+        from cosmos_policy.datasets.bench2dex_embodiment import read_bundle, select_task
+
+        bundle, _, statistics = read_bundle(embodiment_manifest, args.robot_map)
+        task = select_task(bundle, task_id)
+        if bundle["robot_key"] != profile.robot_key:
+            raise ValueError("evaluation task and checkpoint embodiment differ")
+        if file_hash(args.manifest) != task["audit_sha256"] or file_hash(args.embedding) != task["embedding_sha256"]:
+            raise ValueError("evaluation task audit or embedding differs from the training bundle")
+        require_checkpoint_contract(args.checkpoint, embodiment_manifest)
+    elif (Path(args.checkpoint) / MARKER).exists():
+        raise ValueError("embodiment checkpoint requires --embodiment-manifest for shared normalization")
     if profile.active_joint_names != statistics.active_joint_names or not profile.active_joint_names:
         raise ValueError("manifest statistics do not match the audited robot profile")
     with np.load(args.embedding, allow_pickle=False) as saved:
@@ -369,6 +384,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Serve an audited Cosmos policy to Bench2Dex REMOTE evaluation")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", required=True)
+    parser.add_argument("--embodiment-manifest", help="Training bundle for a shared embodiment checkpoint")
     parser.add_argument("--robot-map", required=True)
     parser.add_argument("--embedding", required=True)
     parser.add_argument("--experiment", help="Defaults to the experiment registered for the audited task ID")
@@ -391,7 +407,12 @@ def main() -> None:
         parser.error("--denoising-steps must be positive")
     profile, statistics, description, embedding, task_id = _load_inputs(args)
     args.task_id = task_id
-    args.experiment = args.experiment or f"cosmos_predict2_2b_480p_bench2dex_task{task_id}"
+    if args.embodiment_manifest:
+        os.environ["BENCH2DEX_EMBODIMENT_MANIFEST"] = str(Path(args.embodiment_manifest).resolve())
+        args.experiment = args.experiment or f"cosmos_predict2_2b_480p_bench2dex_{profile.robot_key}"
+    else:
+        os.environ.pop("BENCH2DEX_EMBODIMENT_MANIFEST", None)
+        args.experiment = args.experiment or f"cosmos_predict2_2b_480p_bench2dex_task{task_id}"
     os.environ["BENCH2DEX_TASK_ID"] = task_id
     os.environ["BENCH2DEX_ACTIVE_JOINTS"] = str(len(profile.active_joint_names))
     os.environ["BENCH2DEX_MANIFEST"] = str(Path(args.manifest).expanduser().resolve())

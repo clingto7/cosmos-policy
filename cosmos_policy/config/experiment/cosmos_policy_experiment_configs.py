@@ -25,12 +25,14 @@ from cosmos_policy._src.imaginaire.utils import log
 from cosmos_policy._src.imaginaire.utils.checkpoint_db import get_checkpoint_path  # noqa: F401
 from cosmos_policy.bench2dex_proof import FiniteTrainingStep
 from cosmos_policy.datasets.aloha_dataset import ALOHADataset
+from cosmos_policy.datasets.bench2dex_embodiment import resolve_embodiment_config
 from cosmos_policy.datasets.bench2dex_training import (
     load_bench2dex_training_dataset,
     resolve_bench2dex_task_config,
 )
 from cosmos_policy.datasets.libero_dataset import LIBERODataset
 from cosmos_policy.datasets.robocasa_dataset import RoboCasaDataset
+from cosmos_policy.experiments.robot.bench2dex.recipe import make_embodiment_experiment
 from cosmos_policy.models.policy_video2world_model import CosmosPolicyVideo2WorldModel
 from cosmos_policy.modules.hybrid_edm_sde import HybridEDMSDE
 
@@ -48,7 +50,10 @@ BENCH2DEX_EMBEDDING = os.environ.get(
 )
 _expected_task_id = os.environ.get("BENCH2DEX_TASK_ID")
 _expected_active_joints = os.environ.get("BENCH2DEX_ACTIVE_JOINTS")
-BENCH2DEX_TASK_CONFIG = resolve_bench2dex_task_config(
+BENCH2DEX_EMBODIMENT_MANIFEST = os.environ.get("BENCH2DEX_EMBODIMENT_MANIFEST", "")
+BENCH2DEX_TASK_CONFIG = resolve_embodiment_config(
+    BENCH2DEX_EMBODIMENT_MANIFEST, BENCH2DEX_ROBOT_MAP
+) if BENCH2DEX_EMBODIMENT_MANIFEST else resolve_bench2dex_task_config(
     BENCH2DEX_MANIFEST,
     BENCH2DEX_ROBOT_MAP,
     expected_task_id=_expected_task_id,
@@ -251,6 +256,13 @@ cosmos_predict2_2b_480p_bench2dex_task["job"].update(
 )
 # Backwards-compatible Python symbol for existing Task03 launch helpers.
 cosmos_predict2_2b_480p_bench2dex_task03 = cosmos_predict2_2b_480p_bench2dex_task
+
+bench2dex_embodiment_experiments = []
+if BENCH2DEX_EMBODIMENT_MANIFEST:
+    bench2dex_embodiment_experiments.append(make_embodiment_experiment(
+        cosmos_predict2_2b_480p_bench2dex_task, BENCH2DEX_EMBODIMENT_MANIFEST,
+        BENCH2DEX_ROBOT_MAP, BENCH2DEX_TASK_CONFIG["robot_key"],
+    ))
 
 # Inference version
 cosmos_predict2_2b_480p_libero__inference_only = LazyDict(
@@ -546,6 +558,7 @@ def register_configs():
         cosmos_predict2_2b_480p_libero,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_libero__inference_only,
         cosmos_predict2_2b_480p_bench2dex_task,
+        *bench2dex_embodiment_experiments,
         # RoboCasa
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task,  # *** Main checkpoint ***
         cosmos_predict2_2b_480p_robocasa_50_demos_per_task__inference,

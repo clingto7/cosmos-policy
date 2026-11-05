@@ -1,5 +1,9 @@
 # Bench2Dex task-specific training and closed-loop evaluation
 
+For shared checkpoints across tasks of the same robot, use the
+[per-embodiment workflow](../../../../docs/experiments/per-embodiment-training.md).
+The commands below describe the retained per-task mode.
+
 The audit manifest is the task configuration source. It records the two-digit
 task ID, robot key, named active joints, four policy cameras, 16-step horizon,
 20 Hz control rate, matched demonstrations, and per-task statistics. Training

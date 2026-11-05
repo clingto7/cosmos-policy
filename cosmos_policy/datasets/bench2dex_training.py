@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-import json
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -37,6 +37,20 @@ def resolve_bench2dex_task_config(
             "control_hz": 20,
         }
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    return resolve_bench2dex_audit_config(
+        manifest, robot_map_path,
+        expected_task_id=expected_task_id, expected_active_joints=expected_active_joints,
+    )
+
+
+def resolve_bench2dex_audit_config(
+    manifest: dict,
+    robot_map_path: str,
+    *,
+    expected_task_id: str | None = None,
+    expected_active_joints: int | None = None,
+) -> dict[str, object]:
+    """Validate an audit, whether standalone or embedded in an embodiment bundle."""
     if not manifest.get("ready") or manifest.get("source_count") != 100 or manifest.get("matched_count") != 100:
         raise ValueError("Bench2Dex model config requires an audit of 100 matched demonstrations")
     task_id = manifest.get("task_id")

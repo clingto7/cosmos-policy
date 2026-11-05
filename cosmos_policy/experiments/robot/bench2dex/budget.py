@@ -35,14 +35,18 @@ class Budget:
         return self.global_batch * self.max_steps
 
     @property
+    def first_cycle_steps(self):
+        # Scale the complete LIBERO 40k recipe: 30k decay + 10k constant LR.
+        return min(self.max_steps, max(2, round(self.max_steps * 3 / 4)))
+
+    @property
     def warmup_steps(self):
-        # Preserve the original 1000/30000 warmup fraction, including short smoke runs.
-        return min(self.max_steps - 1, max(1, round(self.max_steps / 30)))
+        return min(self.first_cycle_steps - 1, max(1, round(self.max_steps / 40)))
 
     def scheduler(self):
         return dict(
             warm_up_steps=[self.warmup_steps, 0],
-            cycle_lengths=[self.max_steps, 100000000000000],
+            cycle_lengths=[self.first_cycle_steps, 100000000000000],
             f_start=[1e-6, 0.06],
             f_max=[1.0, 0.06],
             f_min=[0.3, 0.06],
@@ -60,6 +64,7 @@ class Budget:
                     "global_batch",
                     "total_samples",
                     "warmup_steps",
+                    "first_cycle_steps",
                 )
             },
             "expected_samples_per_task": self.total_samples / self.task_count,

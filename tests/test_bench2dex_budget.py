@@ -32,7 +32,7 @@ def test_budget_rank_partition_and_resume(tasks, gpus, micro, gb, total):
         EmbodimentSampler(data, gpus, 0, gb + gpus)
 
 
-@pytest.mark.parametrize("steps", [4, 100, 32000, 50000])
+@pytest.mark.parametrize("steps", [4, 8, 100, 32000, 40000, 50000])
 def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monkeypatch):
     import importlib.util
     import sys
@@ -49,10 +49,10 @@ def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monke
     curve = LinearScheduler(**budget.scheduler())
     assert curve.schedule(0) == pytest.approx(1e-6)
     assert curve.schedule(budget.warmup_steps) == pytest.approx(1)
-    assert curve.schedule(steps) == pytest.approx(0.3)
-    assert curve.schedule(steps + 1) == pytest.approx(0.06)
+    assert curve.schedule(budget.first_cycle_steps) == pytest.approx(0.3)
+    assert curve.schedule(budget.first_cycle_steps + 1) == pytest.approx(0.06)
     # Preserve the original curve, with only its time axis scaled.
-    midpoint = (steps + budget.warmup_steps) / 2
+    midpoint = (budget.first_cycle_steps + budget.warmup_steps) / 2
     assert curve.schedule(midpoint) == pytest.approx(0.65)
     assert curve.schedule(steps + 100) == pytest.approx(0.06)
     values = [curve.schedule(i) for i in range(budget.warmup_steps, steps + 1)]
@@ -60,9 +60,10 @@ def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monke
     param = torch.nn.Parameter(torch.ones(1))
     optimizer = torch.optim.SGD([param], lr=1e-4)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, curve.schedule)
-    for _ in range(3):
+    for _ in range(budget.first_cycle_steps):
         optimizer.step()
         scheduler.step()
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(3e-5)
     state = scheduler.state_dict()
     optstate = optimizer.state_dict()
     other_opt = torch.optim.SGD([param], lr=1e-4)
@@ -74,7 +75,7 @@ def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monke
     other_opt.step()
     other.step()
     assert other.get_last_lr() == scheduler.get_last_lr()
-    assert scheduler.get_last_lr()[0] == pytest.approx(1e-4 * curve.schedule(4))
+    assert scheduler.get_last_lr()[0] == pytest.approx(6e-6)
 
 
 def test_metrics_resume_excludes_uncheckpointed_updates_and_partial_tail(tmp_path):
@@ -168,3 +169,11 @@ def test_metrics_callback_aggregates_microbatches_and_missing_tasks(tmp_path, mo
     row = json.loads((tmp_path / 'metrics.jsonl').read_text().splitlines()[-1])
     assert row['task_action_mse']['79'] is None
     assert row['task_samples_seen'] == {'03': 7, '79': 1}
+
+
+def test_complete_libero_recipe_time_scaling():
+    budget = Budget(2, 32000)
+    assert budget.first_cycle_steps == 24000 and budget.warmup_steps == 800
+    original = Budget(2, 40000)
+    assert original.first_cycle_steps == 30000 and original.warmup_steps == 1000
+    assert budget.scheduler()["f_min"] == original.scheduler()["f_min"] == [0.3, 0.06]

@@ -60,7 +60,7 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
     check_output_path(args.output)
     run_dir = args.output.resolve() / "cosmos_policy" / "bench2dex_embodiment" / args.run_name
     check_output_path(run_dir)
-    max_iter = 4 if args.smoke else getattr(args, "max_steps", 32000)
+    max_iter = getattr(args, "smoke_steps", 4) if args.smoke else getattr(args, "max_steps", 32000)
     save_iter = 2 if args.smoke else 5000
     budget = Budget(len(bundle["tasks"]), max_iter)
     expected = getattr(args, "expected_tasks", None)
@@ -204,6 +204,10 @@ def main():
     )
     parser.add_argument(
         "--smoke", action="store_true", help="Isolated 4-update/2-save GPU proof; use a separate run name"
+    )
+    parser.add_argument(
+        "--smoke-steps", type=int, choices=(4, 8), default=4,
+        help="Use 8 with --smoke to exercise the low-LR stage as well as save/restore",
     )
     parser.add_argument("--execute", action="store_true", help="Without this flag, print the plan and write nothing")
     parser.add_argument(

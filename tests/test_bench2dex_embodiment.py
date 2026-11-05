@@ -206,7 +206,7 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
         assert recipe["trainer"]["callbacks"][name]["run_at_start"] is False
     assert recipe["checkpoint"]["save_iter"] == 5000
     assert recipe["checkpoint"]["dcp_async_mode_enabled"] is False
-    assert recipe["scheduler"]["cycle_lengths"] == [32000, 100000000000000]
+    assert recipe["scheduler"]["cycle_lengths"] == [24000, 100000000000000]
     assert recipe["scheduler"]["_target_"] == "cosmos_policy._src.imaginaire.functional.lr_scheduler.LambdaLinearScheduler"
     assert recipe["scheduler"]["f_start"] == [1e-6, 0.06]
     assert recipe["scheduler"]["f_max"] == [1.0, 0.06]
@@ -233,11 +233,11 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     args.max_steps = 12000
     _, shorter, _ = plan_run(args)
     assert shorter["total_samples"] == 128 * 12000
-    assert shorter["scheduler"]["cycle_lengths"] == [12000, 100000000000000]
+    assert shorter["scheduler"]["cycle_lengths"] == [9000, 100000000000000]
     monkeypatch.setenv("BENCH2DEX_MAX_STEPS", "12000")
     shorter_recipe = make_embodiment_experiment(original, str(prepared.bundle), str(prepared.robot_map), "test_robot")
     assert shorter_recipe["dataloader_train"]["dataset"]["total_samples"] == 128 * 12000
-    assert shorter_recipe["scheduler"]["warm_up_steps"] == [400, 0]
+    assert shorter_recipe["scheduler"]["warm_up_steps"] == [300, 0]
     assert shorter_recipe["trainer"]["max_iter"] == 12000
     args.expected_tasks = 3
     with pytest.raises(ValueError, match="task count"):
@@ -246,6 +246,10 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     args.smoke = True
     _, smoke_identity, _ = plan_run(args)
     assert smoke_identity["max_iter"] == 4 and smoke_identity != identity
+    args.smoke_steps = 8
+    _, stage_smoke, _ = plan_run(args)
+    assert stage_smoke["max_iter"] == 8 and stage_smoke["total_samples"] == 1024
+    assert stage_smoke["first_cycle_steps"] == 6 and stage_smoke["warmup_steps"] == 1
     weights.write_bytes(b"changed")
     _, changed, _ = plan_run(args)
     assert changed["base_model_sha256"] != identity["base_model_sha256"]

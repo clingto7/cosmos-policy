@@ -84,14 +84,18 @@ The bundle selects one of three explicit launch scripts:
 | 3 | [train_3_task.sh](../../bin/bench2dex/train_3_task.sh) | 8 × 12 × 2 | 192 | 32,000 | 6,144,000 |
 
 All three retain peak LR `1e-4`; no automatic batch-based LR scaling is applied.
-Warmup is `round(max_steps / 30)` (clamped to `[1, max_steps-1]`), followed by
-the original `LambdaLinearScheduler` linear decay to `3e-5` at `max_steps`.
-The original subsequent switch to constant `6e-6` is preserved; a normal run
-stops before using that stage. Only the time axis is scaled. This supersedes
-the cosine curve introduced in 511fd07.
-At 32k this gives 1,067 warmup updates. The standalone launcher accepts
-`--max-steps` for separate experiments; all dependent counts and LR durations
-follow it. The accepted production/final-evaluation protocol remains 32k.
+The complete LIBERO 40k schedule is scaled to the run budget: warmup is
+`round(max_steps / 40)`, and the first cycle is `round(3 * max_steps / 4)`
+(with bounds for tiny smoke runs). At 32k these are 800 and 24,000 updates.
+The original `LambdaLinearScheduler` reaches `3e-5` at the first-cycle boundary,
+then switches to constant `6e-6` for approximately the remaining 8k updates.
+Its original boundary convention is retained: update 24,001 uses `3e-5`, and
+update 24,002 first uses `6e-6`. Only time parameters change, not the formula or
+LR levels. This supersedes both 511fd07's cosine and 2e92b19's omitted low-LR tail.
+The standalone launcher accepts `--max-steps` for separate experiments; counts and
+schedule durations follow it. Production/final evaluation remains fixed at 32k.
+Use `--smoke --smoke-steps 8` to test the stage transition on GPU; the default
+four-step smoke is too short to actually update at the low constant LR.
 
 Set `PYTHON` to the existing Cosmos environment's Python, `CUDA_VISIBLE_DEVICES`
 to the exact GPU allocation, and export `MANIFEST`, `ROBOT_MAP`, `BASE_MODEL`,
@@ -236,7 +240,7 @@ The audit distinguishes budget-sensitive and invariant settings:
 | Setting | Treatment |
 | --- | --- |
 | GPU count, microbatch, accumulation, global batch, stream length | Derived and cross-checked against bundle task count and `max_steps` |
-| Warmup and LR decay | Derived from `max_steps`; minimum held after the endpoint |
+| Warmup and LR decay | Full-schedule time scaling: 75% first cycle, 2.5% warmup, then constant low LR |
 | Sampler resume offset | Completed optimizer updates × global batch |
 | Checkpoints | Every 5k plus final; synchronous; latest two plus protected final |
 | Loss/LR/sample metrics | Every optimizer update, globally reduced; scheduler advances once per update |

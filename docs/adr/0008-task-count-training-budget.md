@@ -22,20 +22,26 @@ hand-selected subset of tasks.
 
 The owner requires the LR schedule to follow `max_steps`, rather than an inherited
 fixed horizon, and approves keeping the same peak LR across all three batches.
-The owner clarified on 2026-11-05 that only the time axis should scale; changing
-the decay shape was not intended. New runs retain the original
-`LambdaLinearScheduler`, peak LR `1e-4`, warmup fraction `1000 / 30000`
-(1,067 updates at 32k), and original factors: `f_start=[1e-6, 0.06]`,
-`f_max=[1.0, 0.06]`, `f_min=[0.3, 0.06]`. The first cycle length is `max_steps`;
-the subsequent constant cycle retains the original effectively unlimited length.
-Thus the first cycle ends at `3e-5`; only after that boundary does the schedule
-switch to `6e-6`. Normal 32k training stops before using the constant stage.
-LambdaLR update k uses schedule(k-1), then prepares schedule(k) for the next update.
+The owner finalized the stage split on 2026-11-05: scale the complete LIBERO
+40k recipe, not just its first LR cycle. Keep `LambdaLinearScheduler`, peak LR
+`1e-4`, and original factors `f_start=[1e-6, 0.06]`, `f_max=[1.0, 0.06]`,
+`f_min=[0.3, 0.06]`. At 32k use 800 warmup updates, a 24k first cycle ending
+at `3e-5`, then approximately 8k updates at constant `6e-6`.
+For other budgets use `round(max_steps / 40)` warmup and
+`round(3 * max_steps / 4)` first cycle, bounded for tiny smoke runs.
+The second cycle retains the original effectively unlimited length.
 
-This correction supersedes the cosine-to-6e-6 implementation in 511fd07. That
-implementation changed both the decay shape and endpoint, not just the budget.
-Historical per-task configurations remain unchanged. The original first cycle
-was fixed at 30k; only the new embodiment recipe binds its duration to the budget.
+The original scheduler includes the boundary in the first cycle. LambdaLR update
+k uses schedule(k-1): update 24,001 uses `3e-5`, and update 24,002 first uses
+`6e-6`. This one-update convention is preserved, not silently rewritten.
+This is an explicitly selected Bench2Dex baseline, not an officially validated
+32k Cosmos Policy recipe. Reference: [paper Appendix A.2](https://arxiv.org/html/2601.16163v1#A2)
+and [official configuration](https://github.com/NVlabs/cosmos-policy/blob/main/cosmos_policy/config/experiment/cosmos_policy_experiment_configs.py).
+
+This supersedes both the cosine-to-6e-6 implementation in 511fd07 and the
+first-cycle-equals-total-budget implementation in 2e92b19. Historical per-task
+configurations remain unchanged. Only time parameters of the original complete
+schedule are scaled; the linear formula, LR levels and stage transition remain.
 
 Freeze the recipe, input/code hashes and environment in `run-identity.json`.
 Save the resolved training configuration and optimizer settings. Record global
@@ -49,7 +55,9 @@ Save full state every 5k updates and at the final 32k update. Keep the newest tw
 validated checkpoints and preserve the final one. The new final evaluation gate
 requires 32k. Smoke runs use the same GPU/microbatch recipe but four updates and
 saves every two updates, with their own four-step LR schedule and sample budget.
-They are separate runs and cannot be resumed as production runs.
+Use `--smoke --smoke-steps 8` for a stage-transition proof: cycle 1 ends at
+index 6 and update 8 actually uses the constant low LR. Smoke runs are separate
+runs and cannot be resumed as production runs.
 
 ## Evaluation hardware
 

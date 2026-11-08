@@ -12,9 +12,9 @@ from cosmos_policy.datasets.bench2dex_audit import TaskStatistics
 from cosmos_policy.datasets.bench2dex_dataset import CAMERAS, CHUNK_SIZE, RobotProfile
 from cosmos_policy.experiments.robot.bench2dex.runtime import (
     Bench2DexPolicyAdapter,
+    profile_with_inactive_defaults,
     profile_with_urdf_mimics,
 )
-
 
 ACTIVE = tuple(f"joint_{index}" for index in range(26))
 MIMIC = tuple(f"mimic_{index}" for index in range(8))
@@ -97,6 +97,29 @@ class Bench2DexRuntimeTest(unittest.TestCase):
             resolved = profile_with_urdf_mimics(profile, urdf, 2)
         commands = resolved.expand(np.asarray([[1.0]], dtype=np.float32), resolved.full_joint_names)
         np.testing.assert_allclose(commands, [[1.0, -0.75, -1.0]])
+
+    def test_inactive_defaults_preserve_active_order_and_mimics(self) -> None:
+        profile = RobotProfile(
+            "test", ("inactive", "b", "mimic", "a"), ("a", "b"),
+            (("mimic", "a", -2.0, 0.5),),
+        )
+        resolved = profile_with_inactive_defaults(profile, ["inactive", "mimic"])
+        np.testing.assert_allclose(
+            resolved.expand(np.array([[2.0, 3.0], [4.0, 5.0]]), ("mimic", "a", "inactive", "b")),
+            [[-3.5, 2.0, 0.0, 3.0], [-7.5, 4.0, 0.0, 5.0]],
+        )
+        self.assertEqual(resolved.active_joint_names, profile.active_joint_names)
+        for invalid in [[], ["inactive"], ["inactive", "mimic", "b"], ["inactive", "mimic", "mimic"]]:
+            with self.assertRaisesRegex(ValueError, "inactive joints"):
+                profile_with_inactive_defaults(profile, invalid)
+
+    def test_zero_mimic_profile_expands_registered_inactive_joints(self) -> None:
+        profile = RobotProfile("allegro", ("finger", "inactive", "arm"), ("arm", "finger"))
+        resolved = profile_with_inactive_defaults(profile, ["inactive"])
+        np.testing.assert_array_equal(
+            resolved.expand(np.array([[0.3, 0.7]], dtype=np.float32), profile.full_joint_names),
+            np.array([[0.7, 0.0, 0.3]], dtype=np.float32),
+        )
 
     def test_adapter_rejects_wrong_prompt_or_malformed_views(self) -> None:
         adapter = Bench2DexPolicyAdapter(

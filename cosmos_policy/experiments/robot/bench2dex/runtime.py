@@ -159,6 +159,26 @@ def profile_with_urdf_mimics(
     return RobotProfile(profile.robot_key, profile.full_joint_names, profile.active_joint_names, tuple(rules))
 
 
+def profile_with_inactive_defaults(profile: RobotProfile, inactive_joint_names: list[str]) -> RobotProfile:
+    """Match Bench2Dex expand_to_full: zero inactive joints without mimic rules."""
+    inactive = set(inactive_joint_names)
+    if len(inactive) != len(inactive_joint_names) or inactive != (
+        set(profile.full_joint_names) - set(profile.active_joint_names)
+    ):
+        raise ValueError("registry inactive joints do not match robot profile")
+    resolved = set(profile.active_joint_names) | {rule[0] for rule in profile.mimic_rules}
+    # Constant affine rules preserve the strict full-joint expansion contract.
+    # Missing URDF mimic rules still fail in profile_with_urdf_mimics first.
+    defaults = tuple(
+        (name, profile.active_joint_names[0], 0.0, 0.0)
+        for name in profile.full_joint_names if name not in resolved
+    )
+    return RobotProfile(
+        profile.robot_key, profile.full_joint_names, profile.active_joint_names,
+        profile.mimic_rules + defaults,
+    )
+
+
 def handle_rpc_command(adapter: Bench2DexPolicyAdapter, message: dict[str, Any]) -> dict[str, Any]:
     command = message.get("command")
     if command == "reset":
@@ -353,6 +373,7 @@ def _load_inputs(args: argparse.Namespace) -> tuple[RobotProfile, TaskStatistics
         base = Path(dataset_root).expanduser() if dataset_root else map_path.parents[2] / "dex2bench_dataset"
         urdf_rel = robot_entry.get("urdf_path", "").replace("Bench2Dex/", "", 1)
         profile = profile_with_urdf_mimics(profile, base / urdf_rel, mimic_count)
+    profile = profile_with_inactive_defaults(profile, robot_entry.get("inactive_joint_names", []))
     statistics = TaskStatistics.from_dict(manifest["statistics"])
     embodiment_manifest = getattr(args, "embodiment_manifest", None)
     from cosmos_policy.experiments.robot.bench2dex.checkpoints import MARKER, file_hash, require_checkpoint_contract

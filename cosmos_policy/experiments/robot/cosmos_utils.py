@@ -547,7 +547,20 @@ def prepare_images_for_model(images: List[np.ndarray], cfg, flip_images: bool = 
     if cfg.use_jpeg_compression:
         images = apply_jpeg_compression_np(images, quality=95)
     # Resize images to match training distribution
-    processed_images = resize_images(images, COSMOS_IMAGE_SIZE)
+    resize_mode = getattr(cfg, "image_resize_mode", "pil")
+    if resize_mode == "pil":
+        processed_images = resize_images(images, COSMOS_IMAGE_SIZE)
+    elif resize_mode == "cv2-area":
+        import cv2
+
+        # Match Bench2DexDataset._image, including its no-resize fast path.
+        processed_images = np.stack([
+            frame if frame.shape[:2] == (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE)
+            else cv2.resize(frame, (COSMOS_IMAGE_SIZE, COSMOS_IMAGE_SIZE), interpolation=cv2.INTER_AREA)
+            for frame in images
+        ])
+    else:
+        raise ValueError(f"unknown image resize mode: {resize_mode}")
     # Apply image transformations if trained with image augmentations
     if cfg.trained_with_image_aug:
         processed_images = apply_image_transforms(processed_images)

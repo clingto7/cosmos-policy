@@ -237,6 +237,10 @@ def run(args: argparse.Namespace) -> None:
         "expert_steps": expert_steps,
         "seed_namespace": args.seed_namespace,
         "seed_pair": list(seed_pair),
+        "image_preprocessing": {
+            "trained_with_image_aug": args.trained_with_image_aug,
+            "resize_mode": args.image_resize_mode,
+        },
     }
     protocol_file = args.output / "protocol.json"
     if embodiment_manifest:
@@ -259,6 +263,10 @@ def run(args: argparse.Namespace) -> None:
         "--robot-map", str(args.robot_map), "--embedding", str(args.embedding),
         "--task-id", args.task_id, "--checkpoint-id", args.checkpoint_id,
         "--host", "127.0.0.1", "--port", str(args.port), "--seed", "7"]
+    command.extend([
+        "--trained-with-image-aug" if args.trained_with_image_aug else "--no-trained-with-image-aug",
+        "--image-resize-mode", args.image_resize_mode,
+    ])
     if embodiment_manifest:
         command.extend(["--embodiment-manifest", str(embodiment_manifest)])
     environment = os.environ.copy()
@@ -349,6 +357,8 @@ def main() -> None:
     parser.add_argument("--seed-namespace", choices=("pilot", "final"), default="final")
     parser.add_argument("--episodes-per-channel", type=int, default=50)
     parser.add_argument("--max-attempts", type=int, default=100)
+    parser.add_argument("--trained-with-image-aug", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--image-resize-mode", choices=("pil", "cv2-area"), default="pil")
     run(parser.parse_args())
 
 

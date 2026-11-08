@@ -294,6 +294,7 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
         suite="bench2dex",
         use_jpeg_compression=False,
         trained_with_image_aug=args.trained_with_image_aug,
+        image_resize_mode=args.image_resize_mode,
         use_proprio=True,
         normalize_proprio=False,
         use_wrist_image=True,
@@ -394,11 +395,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=9000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--denoising-steps", type=int, default=5)
+    parser.add_argument("--image-resize-mode", choices=("pil", "cv2-area"), default="pil")
     parser.add_argument(
         "--trained-with-image-aug",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Apply the deterministic center crop used during training (default: enabled).",
+        help="Apply the legacy 90%% area center crop (Bench2Dex training does not crop).",
     )
     parser.add_argument("--checkpoint-id", default="", help="Stable label to record in simulator result metadata.")
     args = parser.parse_args()

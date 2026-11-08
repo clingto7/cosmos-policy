@@ -303,6 +303,10 @@ def run(args: argparse.Namespace) -> None:
                     "--output-dir", str(attempt / "results")]
                 if channel != "inv_cov":
                     command.extend(("--anchor-dir", str(args.anchor_dir)))
+                if args.render_gpu is not None:
+                    # CUDA_VISIBLE_DEVICES selects policy CUDA, not Vulkan rendering.
+                    # Keep physics on CPU while pinning rendering on multi-GPU hosts.
+                    command.extend(["--kit_args", f"--/renderer/activeGpu={args.render_gpu} --/renderer/multiGpu/enabled=false"])
                 (attempt / "command.json").write_text(json.dumps(command, indent=2) + "\n")
                 with (attempt / "simulation.log").open("w") as log:
                     returncode = subprocess.call(command, cwd=args.bench_repo, stdout=log, stderr=subprocess.STDOUT)
@@ -349,6 +353,7 @@ def main() -> None:
     parser.add_argument("--seed-namespace", choices=("pilot", "final"), default="final")
     parser.add_argument("--episodes-per-channel", type=int, default=50)
     parser.add_argument("--max-attempts", type=int, default=100)
+    parser.add_argument("--render-gpu", type=int, choices=range(16), help="Physical Vulkan render GPU; physics remains CPU")
     run(parser.parse_args())
 
 

@@ -62,7 +62,8 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
     check_output_path(run_dir)
     max_iter = getattr(args, "smoke_steps", 4) if args.smoke else getattr(args, "max_steps", 32000)
     save_iter = 2 if args.smoke else 5000
-    budget = Budget(len(bundle["tasks"]), max_iter)
+    four_gpu = os.environ.get("BENCH2DEX_SINGLE_TASK_FOUR_GPU") == "1"
+    budget = Budget(len(bundle["tasks"]), max_iter, four_gpu)
     expected = getattr(args, "expected_tasks", None)
     if expected is not None and expected != budget.task_count:
         raise ValueError("script task count differs from the complete embodiment bundle")
@@ -82,7 +83,7 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         "job.project=cosmos_policy",
         "job.group=bench2dex_embodiment",
         f"trainer.max_iter={max_iter}",
-        "trainer.grad_accum_iter=2",
+        f"trainer.grad_accum_iter={budget.grad_accum_iter}",
         f"dataloader_train.batch_size={budget.microbatch}",
         f"checkpoint.save_iter={save_iter}",
         "checkpoint.dcp_async_mode_enabled=false",
@@ -192,6 +193,7 @@ def execute_run(args, command, identity, run_dir):
             BENCH2DEX_EMBODIMENT_MANIFEST=str(args.manifest),
             BENCH2DEX_ROBOT_MAP=str(args.robot_map),
             BENCH2DEX_MAX_STEPS=str(identity["max_iter"]),
+            BENCH2DEX_SINGLE_TASK_FOUR_GPU="1" if identity.get("single_task_four_gpu") else "0",
             COSMOS_POLICY_PRETRAINED_CHECKPOINT=str(args.base_model),
             COSMOS_POLICY_TOKENIZER_CHECKPOINT=str(args.tokenizer),
             IMAGINAIRE_OUTPUT_ROOT=str(args.output),

@@ -1,5 +1,7 @@
 """Runtime checks for the audited Bench2Dex training proof."""
 
+import os
+
 import torch
 
 from cosmos_policy._src.imaginaire.utils import log
@@ -85,7 +87,8 @@ class EmbodimentMetricsCallback(Callback):
         from cosmos_policy.experiments.robot.bench2dex.budget import Budget
         from cosmos_policy.experiments.robot.bench2dex.metrics import MetricsJournal
 
-        self.budget = Budget(len(self.task_ids), self.config.trainer.max_iter)
+        self.budget = Budget(len(self.task_ids), self.config.trainer.max_iter,
+                             os.environ.get("BENCH2DEX_SINGLE_TASK_FOUR_GPU") == "1")
         root = Path(self.config.job.path_local)
         identity = json.loads((root / "run-identity.json").read_text())
         for key, value in self.budget.to_dict().items():
@@ -97,7 +100,7 @@ class EmbodimentMetricsCallback(Callback):
                 raise ValueError(f"resolved scheduler differs from budget: {key}")
         if (
             self.config.optimizer.lr != identity["peak_lr"]
-            or self.config.trainer.grad_accum_iter != 2
+            or self.config.trainer.grad_accum_iter != self.budget.grad_accum_iter
             or self.config.dataloader_train.batch_size != self.budget.microbatch
             or self.config.dataloader_train.dataset.total_samples != self.budget.total_samples
             or distributed.get_world_size() != self.budget.world_size

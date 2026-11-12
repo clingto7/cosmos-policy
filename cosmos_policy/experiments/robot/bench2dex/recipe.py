@@ -10,7 +10,8 @@ from cosmos_policy.experiments.robot.bench2dex.budget import Budget
 
 def make_embodiment_experiment(base, manifest_path, robot_map_path, robot_key):
     task_ids = [t["task_id"] for t in json.loads(Path(manifest_path).read_text())["tasks"]]
-    budget = Budget(len(task_ids), int(os.environ.get("BENCH2DEX_MAX_STEPS", "32000")))
+    budget = Budget(len(task_ids), int(os.environ.get("BENCH2DEX_MAX_STEPS", "32000")),
+                    os.environ.get("BENCH2DEX_SINGLE_TASK_FOUR_GPU") == "1")
     experiment = copy.deepcopy(base)
     experiment["dataloader_train"]["dataset"] = {
         "_target_": "cosmos_policy.datasets.bench2dex_embodiment.load_embodiment_dataset",
@@ -22,7 +23,7 @@ def make_embodiment_experiment(base, manifest_path, robot_map_path, robot_key):
     }
     # The training entry point instantiates EmbodimentSampler once on this dataset.
     experiment["dataloader_train"].update(sampler=None, batch_size=budget.microbatch)
-    experiment["trainer"].update(max_iter=budget.max_steps, grad_accum_iter=2, run_validation=False)
+    experiment["trainer"].update(max_iter=budget.max_steps, grad_accum_iter=budget.grad_accum_iter, run_validation=False)
     # Hydra can merge sampling callbacks from the base experiment later.
     # Override both explicitly so neither fires within this training budget.
     for name in ("every_n_sample_reg", "every_n_sample_ema"):

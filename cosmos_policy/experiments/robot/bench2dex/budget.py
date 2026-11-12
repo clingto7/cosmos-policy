@@ -9,14 +9,17 @@ FINAL_STEPS = 32_000
 class Budget:
     task_count: int
     max_steps: int = FINAL_STEPS
+    single_task_four_gpu: bool = False
 
     def __post_init__(self):
         if self.task_count not in (1, 2, 3) or self.max_steps < 2:
             raise ValueError("budget requires 1/2/3 tasks and at least two optimizer steps")
+        if self.single_task_four_gpu and self.task_count != 1:
+            raise ValueError("four-GPU override requires one task")
 
     @property
     def world_size(self):
-        return {1: 2, 2: 4, 3: 8}[self.task_count]
+        return 4 if self.single_task_four_gpu else {1: 2, 2: 4, 3: 8}[self.task_count]
 
     @property
     def microbatch(self):
@@ -24,7 +27,7 @@ class Budget:
 
     @property
     def grad_accum_iter(self):
-        return 2
+        return 1 if self.single_task_four_gpu else 2
 
     @property
     def global_batch(self):

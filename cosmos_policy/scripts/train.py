@@ -70,7 +70,11 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         if isinstance(dataset, EmbodimentDataset):
             from cosmos_policy.experiments.robot.bench2dex.budget import Budget
 
-            budget = Budget(len(dataset.task_ids), config.trainer.max_iter)
+            budget = Budget(
+                len(dataset.task_ids),
+                config.trainer.max_iter,
+                os.environ.get("BENCH2DEX_SINGLE_TASK_FOUR_GPU") == "1",
+            )
             if (
                 config.dataloader_train.batch_size != budget.microbatch
                 or config.trainer.grad_accum_iter != budget.grad_accum_iter

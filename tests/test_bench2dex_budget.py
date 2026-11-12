@@ -32,6 +32,17 @@ def test_budget_rank_partition_and_resume(tasks, gpus, micro, gb, total):
         EmbodimentSampler(data, gpus, 0, gb + gpus)
 
 
+def test_four_gpu_single_task_sampler_resume():
+    budget = Budget(1, 10, single_task_four_gpu=True)
+    assert (budget.world_size, budget.microbatch, budget.grad_accum_iter, budget.global_batch) == (4, 16, 1, 64)
+    data = EmbodimentDataset([range(1)], ["80"], total_samples=budget.total_samples)
+    samplers = [EmbodimentSampler(data, 4, rank, 64) for rank in range(4)]
+    assert sorted(sum((list(s) for s in samplers), [])) == list(range(640))
+    for rank, sampler in enumerate(samplers):
+        sampler.set_start_iteration(3)
+        assert list(sampler) == list(range(3 * 64 + rank, 640, 4))
+
+
 @pytest.mark.parametrize("steps", [4, 8, 100, 32000, 40000, 50000])
 def test_original_linear_warmup_end_and_real_torch_scheduler_resume(steps, monkeypatch):
     import importlib.util

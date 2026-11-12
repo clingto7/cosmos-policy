@@ -194,7 +194,7 @@ class EmbodimentSampler:
     def __init__(self, dataset, num_replicas, rank, global_batch=GLOBAL_BATCH):
         if num_replicas not in (2, 4, 8) or not 0 <= rank < num_replicas:
             raise ValueError("per-embodiment training requires 2/4/8 data-parallel ranks")
-        if global_batch != {2: 64, 4: 128, 8: 192}[num_replicas] or len(dataset) % global_batch:
+        if (num_replicas, global_batch) not in ((2, 64), (4, 64), (4, 128), (8, 192)) or len(dataset) % global_batch:
             raise ValueError("sampler requires complete global batches matching the GPU recipe")
         self.dataset, self.num_replicas, self.rank = dataset, num_replicas, rank
         self.global_batch, self.start = global_batch, 0

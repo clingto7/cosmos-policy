@@ -8,7 +8,7 @@ import h5py
 import numpy as np
 import pytest
 from test_bench2dex_contract import PROFILE, write_episode
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from cosmos_policy.datasets.bench2dex_audit import audit_task
 from cosmos_policy.datasets.bench2dex_embodiment import (
@@ -278,11 +278,12 @@ def test_worker_prefetch_does_not_change_draws(prepared):
     for task in dataset.datasets:
         task.image_size = 4
     baseline = next(iter(DataLoader(dataset, batch_size=8, num_workers=0)))
-    iterator = iter(DataLoader(dataset, batch_size=8, num_workers=2, multiprocessing_context="spawn"))
-    try:
-        parallel = next(iterator)
-    finally:
-        del iterator
+    # Exhaust a finite prefix so workers exit normally rather than aborting an
+    # in-flight prefetched batch when the iterator is destroyed after one read.
+    batches = list(DataLoader(
+        Subset(dataset, range(32)), batch_size=8, num_workers=2, multiprocessing_context="spawn"
+    ))
+    parallel = batches[0]
     assert parallel["task_id"] == baseline["task_id"]
     assert parallel["__key__"] == baseline["__key__"]
     np.testing.assert_array_equal(parallel["actions"].numpy(), baseline["actions"].numpy())

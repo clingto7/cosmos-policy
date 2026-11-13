@@ -1,5 +1,78 @@
 # Per-embodiment training and task-level evaluation
 
+## Operations entry point
+
+Use `docs/experiments/bench2dex-runs.json` to locate a run and its deployment
+revision. Refresh instance reachability through the Chuangzhi skill before
+remote access; resolve HDD2 data/output paths and check GPU occupancy before
+launch. The registry is a provenance index, never evidence that a host is live.
+Training code remains pinned while its process runs. Use a separate Git worktree
+for operations changes; files under `bin/bench2dex` do not change the launcher's
+`cosmos_policy/**/*.py` source fingerprint.
+
+The admitted new three-task runs use revision `24f1ea1` (production code identical
+to eight-card smoke revision `a3a4f8f`). Their recipe is defined by ADR 0008 and
+frozen in each `run-identity.json`; older checkouts can still default to 5k saves.
+Resolve an apparent documentation/config conflict against the run identity and
+approved deployment, rather than applying a new default to an existing run.
+
+### Audit startup and inspect status
+
+Run from this checkout using the existing Cosmos Python environment:
+
+```sh
+python bin/bench2dex/status.py "$RUN_DIR" --require-ready \
+  --expected-commit 24f1ea1a4caedac8018675ad4ab37dc36d8e5c78 \
+  --expected-source 3a27fc668e8ca4824531d658f0d385a18b1c4518b866e1cb3f653f1848112e0f
+python bin/bench2dex/status.py "$RUN_A" "$RUN_B" --verify-checkpoints
+```
+
+The first command admits startup only after the deployment/config audit passes,
+the launch lock is held, and at least two consecutive finite optimizer updates
+have been recorded in the latest session within the freshness limit (300 seconds
+by default). It checks samples and task membership. It is an observation of
+startup, not a promise that the run will remain healthy. Logs are read without
+changing checkpoint pointers or acquiring the launcher's exclusive lock.
+
+The second command validates full DCP contracts with the training environment.
+Without `--verify-checkpoints`, checkpoint output is explicitly `marker_only`;
+do not call those results freshly validated recoverable checkpoints. Invalid
+checkpoints are listed separately. A completed run may have `ready=false` because
+it no longer owns a lock; inspect target/iteration and validated final checkpoint.
+
+Session-aware speed excludes the first update after startup and uses at most the
+latest 100 remaining updates. It includes data waits and intervening saves. Show
+the sample count with averages and medians; early initialization samples do not
+give a stable ETA. GPU/CPU diagnosis should use a sampling window, GPU power and
+memory, training process-tree CPU core equivalents, and the cgroup quota. A low
+VRAM percentage alone does not justify changing batch or accumulation.
+
+### Checks and verification evidence
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python bin/bench2dex/check.py
+```
+
+This runs existing CPU data/budget/save/recovery contracts and status-tool tests.
+It fails if a new or changed `core`/`core.<pid>` appears inside the checkout, even
+if pytest exits zero, and preserves that artifact. Kernel core files written
+outside the checkout require separate inspection. The GitHub Actions workflow
+`.github/workflows/bench2dex-cpu.yml` runs these contracts and Ruff automatically;
+this CPU job does not substitute for full CUDA-stack or FSDP restore validation.
+
+The 2026-11-13 eight-H100 proof used 06+12+42 for eight updates, saving at
+2/3/4/6/8 and retaining 6/8, then restored all four state components at update 8
+without an additional update. Exact 16,500 behavior is exercised by CPU loop and
+DCP tests. The full existing CUDA environment passed 61 tests and three subtests
+after fixing a test DataLoader's premature worker teardown. Evidence remains at
+the registry's `recipe_validation_root`; it is not long-run convergence evidence.
+
+Dataset preparation and launch currently repeat some hash/statistics work. Keep
+those integrity checks until a content-bound reuse mechanism is implemented.
+During startup report the current phase and elapsed time; avoid repeated full
+configuration dumps. Stop remote polling on an OFF_CAMPUS gate and distinguish
+submitted, starting, admitted, and stale observations in the user report.
+
 This implements [ADR 0007](../adr/0007-per-embodiment-training-budget.md) and the revised budgets in [ADR 0008](../adr/0008-task-count-training-budget.md).
 The CPU data/config/checkpoint contracts can be exercised locally. Real model
 forward/backward and FSDP restore require the CUDA training environment. RGB

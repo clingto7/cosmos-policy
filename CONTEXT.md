@@ -4,6 +4,10 @@ This context defines the robot data and evaluation language used to adapt Cosmos
 
 ## New embodiment save schedule (2026-11-13)
 
+For deployment revisions, run locations, startup admission and status commands,
+read the [operational workflow](docs/experiments/per-embodiment-training.md#operations-entry-point).
+The [run registry](docs/experiments/bench2dex-runs.json) records provenance, not live status.
+
 New 1/2/3-task runs save full state every 2,500 optimizer updates, additionally
 at update 16,500, and at the final 32,000 update. The extra point reduces lost
 progress near the instance lifetime limit without shifting the periodic cadence.

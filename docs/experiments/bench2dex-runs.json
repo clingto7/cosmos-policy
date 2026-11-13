@@ -1,0 +1,29 @@
+{
+  "schema": "bench2dex-run-registry-v1",
+  "note": "Provenance only; discover hosts and inspect artifacts for live status.",
+  "private_root": "/inspire/hdd2/project/roboticsystem2/ky26063/bench2dex_stuff/hqb",
+  "training_checkout": "/inspire/hdd/project/roboticsystem2/ky26063/bench2dex_stuff/hqb/cosmos4dex-3task-a3a4f8f",
+  "approved_commit": "24f1ea1a4caedac8018675ad4ab37dc36d8e5c78",
+  "approved_source_sha256": "3a27fc668e8ca4824531d658f0d385a18b1c4518b866e1cb3f653f1848112e0f",
+  "recipe_validation_root": "triple06_12_42-validation-20261113",
+  "runs": [
+    {
+      "tasks": ["06", "12", "42"],
+      "instance": "yzj-bench2dex-hqb-cosmos-8",
+      "account": "edge",
+      "relative_run_dir": "triple06_12_42-production-20261113/runs/cosmos_policy/bench2dex_embodiment/triple06_12_42_32k_20261113"
+    },
+    {
+      "tasks": ["07", "34", "60"],
+      "instance": "yzj-bench2dex-zyd-gr00t",
+      "account": "edge",
+      "relative_run_dir": "triple07_34_60-production-20261113/runs/cosmos_policy/bench2dex_embodiment/triple07_34_60_32k_20261113"
+    },
+    {
+      "tasks": ["09", "51", "62"],
+      "instance": "yzj-bench2dex-hqb-cosmos-8-copy",
+      "account": "edge",
+      "relative_run_dir": "triple09_51_62-production-20261113/runs/cosmos_policy/bench2dex_embodiment/triple09_51_62_32k_20261113"
+    }
+  ]
+}

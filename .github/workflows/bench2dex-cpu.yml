@@ -1,0 +1,25 @@
+name: Bench2Dex CPU contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - name: Install CPU test dependencies
+        run: |
+          uv venv
+          uv pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -r tests/requirements-bench2dex-cpu.txt ruff==0.12.7
+      - name: Lint Bench2Dex operations and save guards
+        run: .venv/bin/ruff check bin/bench2dex/status.py bin/bench2dex/check.py tests/test_bench2dex_status.py tests/test_bench2dex_save_schedule.py
+      - name: CPU contracts and worker cleanup
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: .venv/bin/python bin/bench2dex/check.py

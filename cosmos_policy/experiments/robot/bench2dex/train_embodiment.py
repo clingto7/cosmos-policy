@@ -61,7 +61,9 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
     run_dir = args.output.resolve() / "cosmos_policy" / "bench2dex_embodiment" / args.run_name
     check_output_path(run_dir)
     max_iter = getattr(args, "smoke_steps", 4) if args.smoke else getattr(args, "max_steps", 32000)
-    save_iter = 2 if args.smoke else 5000
+    save_iter = 2 if args.smoke else 2500
+    # Exercise the off-cadence save in short GPU proofs, too.
+    extra_save_iters = [step for step in ([3] if args.smoke else [16500]) if step <= max_iter]
     budget = Budget(len(bundle["tasks"]), max_iter)
     expected = getattr(args, "expected_tasks", None)
     if expected is not None and expected != budget.task_count:
@@ -85,6 +87,7 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         "trainer.grad_accum_iter=2",
         f"dataloader_train.batch_size={budget.microbatch}",
         f"checkpoint.save_iter={save_iter}",
+        f"checkpoint.extra_save_iters={extra_save_iters}",
         "checkpoint.dcp_async_mode_enabled=false",
     ]
     identity = {
@@ -102,6 +105,7 @@ def plan_run(args) -> tuple[list[str], dict, Path]:
         "scheduler": budget.scheduler(),
         "max_iter": max_iter,
         "save_iter": save_iter,
+        "extra_save_iters": extra_save_iters,
         "sampler_seed": 0,
         "command": command,
     }

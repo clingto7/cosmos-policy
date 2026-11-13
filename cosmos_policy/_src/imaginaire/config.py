@@ -272,6 +272,8 @@ class CheckpointConfig:
     save_to_object_store: ObjectStoreConfig = attrs.field(factory=ObjectStoreConfig)
     # Save the checkpoint every N iterations.
     save_iter: int = 999999999
+    # Additional completed optimizer updates to save, without shifting the cadence.
+    extra_save_iters: list[int] = attrs.field(factory=list)
     # Configs for loading the checkpoints from object store.
     load_from_object_store: ObjectStoreConfig = attrs.field(factory=ObjectStoreConfig)
     # Path of model weights to resume the checkpoint from.

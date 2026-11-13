@@ -75,6 +75,22 @@ def test_truncated_shard_blocks_retention_and_falls_back(tmp_path):
     assert newest.exists()
 
 
+def test_extra_16500_checkpoint_is_recoverable_and_uses_normal_retention(tmp_path):
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text("{}")
+    root = tmp_path / "checkpoints"
+    for iteration in (12500, 15000, 16500):
+        extra = save_checkpoint(root, iteration)
+        mark_and_prune(root, iteration, manifest)
+    assert sorted(p.name for p in root.glob("iter_*")) == ["iter_000015000", "iter_000016500"]
+    assert recover_checkpoint(root, manifest) == extra
+    require_checkpoint_contract(extra, manifest)
+    next_periodic = save_checkpoint(root, 17500)
+    mark_and_prune(root, 17500, manifest)
+    assert sorted(p.name for p in root.glob("iter_*")) == ["iter_000016500", "iter_000017500"]
+    assert recover_checkpoint(root, manifest) == next_periodic
+
+
 def test_foreign_manifest_symlinks_and_changed_metadata_rejected(tmp_path):
     manifest = tmp_path / "bundle.json"
     manifest.write_text("{}")

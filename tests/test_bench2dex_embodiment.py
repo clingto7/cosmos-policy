@@ -204,7 +204,8 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     for name in ("every_n_sample_reg", "every_n_sample_ema"):
         assert recipe["trainer"]["callbacks"][name]["every_n"] == 32001
         assert recipe["trainer"]["callbacks"][name]["run_at_start"] is False
-    assert recipe["checkpoint"]["save_iter"] == 5000
+    assert recipe["checkpoint"]["save_iter"] == 2500
+    assert recipe["checkpoint"]["extra_save_iters"] == [16500]
     assert recipe["checkpoint"]["dcp_async_mode_enabled"] is False
     assert recipe["scheduler"]["cycle_lengths"] == [24000, 100000000000000]
     assert recipe["scheduler"]["_target_"] == "cosmos_policy._src.imaginaire.functional.lr_scheduler.LambdaLinearScheduler"
@@ -228,7 +229,9 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     )
     command, identity, run_dir = plan_run(args)
     assert identity["global_batch"] == 128 and identity["max_iter"] == 32000
-    assert "--nproc_per_node=4" in command and "checkpoint.save_iter=5000" in command
+    assert "--nproc_per_node=4" in command and "checkpoint.save_iter=2500" in command
+    assert identity["extra_save_iters"] == [16500]
+    assert "checkpoint.extra_save_iters=[16500]" in command
     assert not args.output.exists() and run_dir.name == "test-run"
     args.max_steps = 12000
     _, shorter, _ = plan_run(args)
@@ -246,6 +249,7 @@ def test_recipe_and_launcher_freeze_budget_without_mutating_per_task(prepared, m
     args.smoke = True
     _, smoke_identity, _ = plan_run(args)
     assert smoke_identity["max_iter"] == 4 and smoke_identity != identity
+    assert smoke_identity["save_iter"] == 2 and smoke_identity["extra_save_iters"] == [3]
     args.smoke_steps = 8
     _, stage_smoke, _ = plan_run(args)
     assert stage_smoke["max_iter"] == 8 and stage_smoke["total_samples"] == 1024

@@ -46,7 +46,7 @@ def make_embodiment_experiment(base, manifest_path, robot_map_path, robot_key):
         "_target_": "cosmos_policy._src.imaginaire.functional.lr_scheduler.LambdaLinearScheduler",
         **budget.scheduler(),
     }
-    experiment["checkpoint"].update(save_iter=5000, dcp_async_mode_enabled=False)
+    experiment["checkpoint"].update(save_iter=2500, extra_save_iters=[16500], dcp_async_mode_enabled=False)
     experiment["job"].update(
         group="bench2dex_embodiment",
         name=f"cosmos_predict2_2b_480p_bench2dex_{robot_key}",

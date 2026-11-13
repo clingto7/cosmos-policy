@@ -6,6 +6,21 @@ forward/backward and FSDP restore require the CUDA training environment. RGB
 Isaac Sim evaluation requires a supported RTX GPU, separately from the H100
 training allocation. The validation record below states what has been exercised.
 
+## Save schedule for new runs (2026-11-13)
+
+All three launchers now freeze `save_iter=2500` and `extra_save_iters=[16500]`
+in the run identity and resolved configuration. Saves happen after complete
+optimizer updates and contain model, optimizer, scheduler and trainer state.
+The sequence around the extra point is 12,500, 15,000, 16,500, 17,500, 20,000;
+32,000 is always saved. Extra/periodic/final collisions save only once.
+Recovery from 16,500 continues at 16,501 and keeps the next periodic save at
+17,500. Normal newest-two retention applies; 16,500 is not permanently protected.
+
+Smoke uses a two-update interval and an extra save at update 3. Prefer eight
+updates to cover that path and the low-LR transition, then `--verify-restore`.
+CPU tests cover the exact 16,500 boundary and real DCP recovery/retention.
+Existing production processes and their identities are not migrated by this change.
+
 ## Prepare one bundle per embodiment
 
 Keep existing per-task audits and T5 embeddings. Create a JSON catalog whose
@@ -242,7 +257,7 @@ The audit distinguishes budget-sensitive and invariant settings:
 | GPU count, microbatch, accumulation, global batch, stream length | Derived and cross-checked against bundle task count and `max_steps` |
 | Warmup and LR decay | Full-schedule time scaling: 75% first cycle, 2.5% warmup, then constant low LR |
 | Sampler resume offset | Completed optimizer updates × global batch |
-| Checkpoints | Every 5k plus final; synchronous; latest two plus protected final |
+| Checkpoints | Every 2.5k plus 16.5k and final; synchronous; latest two plus protected final |
 | Loss/LR/sample metrics | Every optimizer update, globally reduced; scheduler advances once per update |
 | Console/device monitoring | Existing 5-update interval; not a training horizon |
 | Periodic validation | Disabled; generation callback scheduled beyond the run budget |

@@ -51,10 +51,13 @@ A resumed run starts a new log session at the checkpoint's committed update;
 records beyond that checkpoint remain historical attempts, not extra consumed
 samples in the resumed trajectory. LR and optimizer state resume together.
 
-Save full state every 5k updates and at the final 32k update. Keep the newest two
+On 2026-11-13 the owner revised saves to every 2,500 updates plus an extra
+16,500-update save and the final 32k save, to reduce rollback near the instance
+lifetime limit. The extra save does not shift the periodic cadence. Keep the newest two
 validated checkpoints and preserve the final one. The new final evaluation gate
 requires 32k. Smoke runs use the same GPU/microbatch recipe but four updates and
-saves every two updates, with their own four-step LR schedule and sample budget.
+saves every two updates plus update 3 to exercise the extra-save path, with
+their own short LR schedule and sample budget.
 Use `--smoke --smoke-steps 8` for a stage-transition proof: cycle 1 ends at
 index 6 and update 8 actually uses the constant low LR. Smoke runs are separate
 runs and cannot be resumed as production runs.

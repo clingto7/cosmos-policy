@@ -67,6 +67,7 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         self.callbacks.on_optimizer_init_end()
         # Load the model checkpoint and get the starting iteration number.
         iteration = self.checkpointer.load(model, optimizer, scheduler, grad_scaler)
+        last_saved_iteration = iteration
         if hasattr(dataloader_train.sampler, "set_start_iteration"):
             dataloader_train.sampler.set_start_iteration(iteration)
         grad_accum_iter = 0
@@ -140,8 +141,12 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
                     # Do the following when an actual optimizer (update) step has been made.
                     iteration += 1
                     # Save checkpoint.
-                    if iteration % self.config.checkpoint.save_iter == 0:
+                    if (
+                        iteration % self.config.checkpoint.save_iter == 0
+                        or iteration in self.config.checkpoint.extra_save_iters
+                    ):
                         self.checkpointer.save(model, optimizer, scheduler, grad_scaler, iteration=iteration)
+                        last_saved_iteration = iteration
                     self.callbacks.on_training_step_end(model, data_batch, output_batch, loss, iteration=iteration)
                     # Validation.
                     if self.config.trainer.run_validation and iteration % self.config.trainer.validation_iter == 0:
@@ -157,7 +162,7 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
                 if _end_training:
                     break
         log.success("Done with training.")
-        if iteration % self.config.checkpoint.save_iter != 0:
+        if iteration != last_saved_iteration:
             self.checkpointer.save(model, optimizer, scheduler, grad_scaler, iteration=iteration)
         self.callbacks.on_train_end(model, iteration=iteration)
         self.checkpointer.finalize()

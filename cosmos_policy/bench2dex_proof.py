@@ -102,6 +102,8 @@ class EmbodimentMetricsCallback(Callback):
             or self.config.dataloader_train.dataset.total_samples != self.budget.total_samples
             or distributed.get_world_size() != self.budget.world_size
             or self.config.trainer.grad_scaler_args.get("enabled", False)
+            or self.config.checkpoint.save_iter != identity["save_iter"]
+            or list(self.config.checkpoint.extra_save_iters) != identity["extra_save_iters"]
         ):
             raise ValueError("resolved optimizer/data/distributed configuration differs from identity")
         if distributed.is_rank0():

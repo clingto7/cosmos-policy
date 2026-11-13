@@ -2,7 +2,16 @@
 
 This context defines the robot data and evaluation language used to adapt Cosmos Policy to Bench2Dex. The per-embodiment data contract is defined in [ADR 0007](docs/adr/0007-per-embodiment-training-budget.md); current 1/2/3-task budgets, budget-bound LR and CPU physics are defined in [ADR 0008](docs/adr/0008-task-count-training-budget.md).
 
-## Current batch workflow
+## New embodiment save schedule (2026-11-13)
+
+New 1/2/3-task runs save full state every 2,500 optimizer updates, additionally
+at update 16,500, and at the final 32,000 update. The extra point reduces lost
+progress near the instance lifetime limit without shifting the periodic cadence.
+It uses normal newest-two retention; the final checkpoint remains protected.
+Existing running processes retain their frozen schedule. New source identities
+require separate runs; do not silently adopt an old production run.
+
+## Historical per-task batch workflow
 
 Historical per-task runs followed [ADR 0006](docs/adr/0006-fixed-budget-two-gpu-batch.md)
 and the [fixed-budget workflow](docs/experiments/fixed-budget-batch.md): two H100

@@ -47,6 +47,31 @@ give a stable ETA. GPU/CPU diagnosis should use a sampling window, GPU power and
 memory, training process-tree CPU core equivalents, and the cgroup quota. A low
 VRAM percentage alone does not justify changing batch or accumulation.
 
+### Select recovery before launch
+
+- Inventory every run identity matching the requested task set before choosing a
+  recovery. Compare latest-session update, newest fully validated checkpoint,
+  host generation, active process and lock. The most recently interrupted run is
+  not automatically the best recovery target.
+- Preserve a healthy matching process. If none is active, resume the eligible run
+  with the newest validated full checkpoint; later logged updates are not
+  recoverable state. Keep task set, bundle hashes, pinned source and output path
+  tied to that run identity.
+- The single-task four-GPU recipe lives on `feat/task80-four-gpu-rerun`, not in
+  this main branch. In that checkout, set
+  `BENCH2DEX_SINGLE_TASK_FOUR_GPU=1` in the exact launcher process before plan
+  creation. `CUDA_VISIBLE_DEVICES` alone does not select the planner's four-GPU
+  budget. Before execution, compare the planned identity with the existing run,
+  including world size, global batch, save interval and source.
+
+### Stop only the identified training run
+
+Confirm the current host generation, then select processes by the unique run name
+and exact training command. Exclude the inspection process itself; verify every
+member of a target process group belongs to that run before sending `SIGTERM`.
+After termination, recheck the exact run's processes and lock. Preserve logs and
+checkpoints, and report last logged update separately from newest valid save.
+
 ### Checks and verification evidence
 
 ```sh

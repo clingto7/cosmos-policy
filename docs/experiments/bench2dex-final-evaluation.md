@@ -22,6 +22,21 @@ python bin/bench2dex_final_eval.py \
 
 Every simulator attempt has its own directory and log. Restart the same command after interruption; it reads accepted episode indices, retries missing indices with the same seeds, and refuses a changed protocol. Valid unsuccessful episodes count against SR. Infrastructure errors and nonzero simulator exits remain in the attempt logs. The runner writes a channel summary, 50 selected per-episode rows, 50 rollout videos, and a four-channel task summary. The original HDF5 recordings remain under attempt directories.
 
+## Progress, throughput and ETA
+
+Report accepted episodes against the per-channel denominator, valid successes and
+failures, infrastructure errors, current attempt, episode index and physics step.
+Read accepted counts from `per_episode.jsonl` and `summary.json`; inspect the live
+attempt's `simulation.log` to confirm its episode and step are advancing. An active
+PID alone does not prove progress.
+
+Estimate throughput from elapsed time per accepted episode in recent successful
+attempts, excluding infrastructure retries. Estimate remaining time from each
+channel's remaining episodes and observed rate; report a range when attempts vary.
+GPU utilization is an instantaneous sample: low utilization alone does not mean
+the evaluation is stalled while episode steps and policy logs keep advancing.
+Record host generation and observation time with every estimate.
+
 After all 26 selected checkpoints have final outputs, place or link each task directory under one evaluation root and run:
 
 ```sh

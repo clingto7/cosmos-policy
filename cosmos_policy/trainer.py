@@ -20,6 +20,7 @@ This trainer extends the base ImaginaireTrainer to add:
 - Epoch tracking and sampler epoch setting for proper distributed sampling
 """
 
+import os
 import signal
 
 import torch
@@ -82,6 +83,14 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
 
         log.info("Starting training...")
         self.callbacks.on_train_start(model, iteration=iteration)
+        checkpoint_control = None
+        last_saved_iteration = None
+        if os.environ.get("BENCH2DEX_EMBODIMENT_MANIFEST"):
+            from cosmos_policy.experiments.robot.bench2dex.checkpoint_control import CheckpointControl
+
+            if self.config.checkpoint.dcp_async_mode_enabled:
+                raise ValueError("Manual Bench2Dex checkpoint requests require synchronous saves")
+            checkpoint_control = CheckpointControl(self.config.job.path_local)
         # Initial validation.
         if self.config.trainer.run_validation and iteration == 0 and self.config.trainer.run_validation_on_start:
             self.validate(model, dataloader_val, iteration=iteration)
@@ -141,13 +150,27 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
                     # Do the following when an actual optimizer (update) step has been made.
                     iteration += 1
                     # Save checkpoint.
-                    if (
+                    periodic_save = (
                         iteration % self.config.checkpoint.save_iter == 0
                         or iteration in self.config.checkpoint.extra_save_iters
-                    ):
+                    )
+
+                    def save_checkpoint():
+                        nonlocal last_saved_iteration
                         self.checkpointer.save(model, optimizer, scheduler, grad_scaler, iteration=iteration)
                         last_saved_iteration = iteration
+
+                    stop_requested = False
+                    if checkpoint_control is not None:
+                        stop_requested = checkpoint_control.after_update(
+                            iteration, save_checkpoint, periodic=periodic_save
+                        )
+                    elif periodic_save:
+                        save_checkpoint()
                     self.callbacks.on_training_step_end(model, data_batch, output_batch, loss, iteration=iteration)
+                    if stop_requested:
+                        _end_training = True
+                        break
                     # Validation.
                     if self.config.trainer.run_validation and iteration % self.config.trainer.validation_iter == 0:
                         self.validate(model, dataloader_val, iteration=iteration)
@@ -168,3 +191,5 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         self.checkpointer.finalize()
         distributed.barrier()
         self.callbacks.on_app_end()
+        if checkpoint_control is not None:
+            checkpoint_control.close()

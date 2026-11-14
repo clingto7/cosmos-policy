@@ -20,13 +20,23 @@ from typing import Any, Callable
 import numpy as np
 
 from cosmos_policy.datasets.bench2dex_audit import TaskStatistics
-from cosmos_policy.datasets.bench2dex_dataset import CAMERAS, CHUNK_SIZE, RobotProfile
+from cosmos_policy.datasets.bench2dex_dataset import CAMERAS, CHUNK_SIZE, RobotProfile, resize_bench2dex_rgb
 
 logger = logging.getLogger("bench2dex_runtime")
 MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 # Isaac Sim may spend over a minute initializing a scene after connecting to
 # the policy server. Keep the RPC socket open through that startup window.
 REQUEST_TIMEOUT_SECONDS = 300.0
+
+IMAGE_KEYS = ("left_wrist_image", "right_wrist_image", "primary_image", "secondary_image")
+
+
+def prepare_bench2dex_model_observation(observation: dict[str, Any], image_size: int) -> dict[str, Any]:
+    """Match the RGB resize applied to Bench2Dex training samples."""
+    return {
+        **observation,
+        **{key: resize_bench2dex_rgb(observation[key], image_size) for key in IMAGE_KEYS},
+    }
 
 
 def _decode_observation(payload: dict[str, Any], expected_prompt: str, profile: RobotProfile, statistics: TaskStatistics):
@@ -270,7 +280,7 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
     if not torch.cuda.is_available():
         raise RuntimeError("Bench2Dex task03 Cosmos inference requires CUDA")
 
-    from cosmos_policy.experiments.robot.cosmos_utils import get_action, get_model
+    from cosmos_policy.experiments.robot.cosmos_utils import COSMOS_IMAGE_SIZE, get_action, get_model
 
     cfg = SimpleNamespace(
         ckpt_path=args.checkpoint,
@@ -309,6 +319,11 @@ def _make_predictor(args: argparse.Namespace, profile: RobotProfile, statistics:
     def predict(observation: dict[str, Any], instruction: str, seed: int) -> np.ndarray:
         if instruction != args.task_description:
             raise ValueError("runtime instruction differs from the model's audited prompt")
+        # The Bench2Dex dataset uses cv2 INTER_AREA at 224px with no image
+        # augmentation. Feed that exact image to the shared policy sampler.
+        # The explicit image-aug flag retains the historical PIL/crop path.
+        if not args.trained_with_image_aug:
+            observation = prepare_bench2dex_model_observation(observation, COSMOS_IMAGE_SIZE)
         result = get_action(
             inference_cfg,
             model,
@@ -397,8 +412,8 @@ def main() -> None:
     parser.add_argument(
         "--trained-with-image-aug",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply the deterministic center crop used during training (default: enabled).",
+        default=False,
+        help="Use the historical PIL resize and 90% center crop (default: match Bench2Dex training images).",
     )
     parser.add_argument("--checkpoint-id", default="", help="Stable label to record in simulator result metadata.")
     args = parser.parse_args()

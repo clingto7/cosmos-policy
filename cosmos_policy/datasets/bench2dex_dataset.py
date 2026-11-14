@@ -232,6 +232,15 @@ def inspect_episode(path: str | Path, profile: RobotProfile) -> EpisodeInfo:
         return EpisodeInfo(path, robot_key, joint_indices, action_indices, tuple(runs), observed, cutoff, frame_count)
 
 
+def resize_bench2dex_rgb(frame: np.ndarray, image_size: int) -> np.ndarray:
+    """Use the same area resize for training frames and simulator observations."""
+    if frame.shape[:2] == (image_size, image_size):
+        return np.ascontiguousarray(frame)
+    import cv2
+
+    return cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_AREA)
+
+
 def _image(file: h5py.File, camera: str, index: int, image_size: int) -> np.ndarray:
     dataset = file[f"cameras/{camera}/rgb"]
     if dataset.ndim == 1:
@@ -244,11 +253,7 @@ def _image(file: h5py.File, camera: str, index: int, image_size: int) -> np.ndar
         frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     else:
         frame = np.asarray(dataset[index], dtype=np.uint8)
-    if frame.shape[:2] != (image_size, image_size):
-        import cv2
-
-        frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_AREA)
-    return frame
+    return resize_bench2dex_rgb(frame, image_size)
 
 
 def _video(current: list[np.ndarray], future: list[np.ndarray]) -> tuple[np.ndarray, dict[str, int]]:

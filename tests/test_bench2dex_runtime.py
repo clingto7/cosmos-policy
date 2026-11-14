@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cv2
+import h5py
 import numpy as np
 
 from cosmos_policy.datasets.bench2dex_audit import TaskStatistics
@@ -51,6 +53,39 @@ def make_observation() -> dict:
 
 
 class Bench2DexRuntimeTest(unittest.TestCase):
+    def test_inference_rgb_matches_training_frame_from_same_jpeg(self) -> None:
+        from cosmos_policy.datasets.bench2dex_dataset import _image
+        from cosmos_policy.experiments.robot.bench2dex.runtime import prepare_bench2dex_model_observation
+
+        y, x = np.indices((480, 640))
+        rgb = np.stack(((x * 3) % 256, (y * 5) % 256, (x + y) % 256), axis=-1).astype(np.uint8)
+        ok, jpeg = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        self.assertTrue(ok)
+        observation = {key: rgb.copy() for key in (
+            "left_wrist_image", "right_wrist_image", "primary_image", "secondary_image"
+        )}
+        observation["proprio"] = np.zeros(26, dtype=np.float32)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "frame.hdf5"
+            with h5py.File(path, "w") as file:
+                camera = file.create_group("cameras/cam_stereo_left")
+                data = camera.create_dataset("rgb", (1,), dtype=h5py.vlen_dtype(np.uint8))
+                data[0] = np.asarray(jpeg, dtype=np.uint8)
+            with h5py.File(path) as file:
+                training_frame = _image(file, "cam_stereo_left", 0, 224)
+
+        # The simulator provides decoded RGB from its camera, so compare against
+        # the decoded JPEG used by training, before either path resizes it.
+        decoded = cv2.cvtColor(cv2.imdecode(jpeg, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+        for key in observation:
+            if key != "proprio":
+                observation[key] = decoded.copy()
+        prepared = prepare_bench2dex_model_observation(observation, 224)
+        for key in ("left_wrist_image", "right_wrist_image", "primary_image", "secondary_image"):
+            np.testing.assert_array_equal(prepared[key], training_frame)
+        np.testing.assert_array_equal(prepared["proprio"], observation["proprio"])
+
     def test_adapter_maps_four_named_views_and_expands_absolute_targets(self) -> None:
         seen: dict = {}
 

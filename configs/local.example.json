@@ -1,0 +1,4 @@
+{
+  "cosmos_python": "/absolute/path/to/cosmos-python",
+  "sim_python": "/absolute/path/to/isaac-python"
+}

@@ -30,6 +30,7 @@ def test_actual_trainer_save_boundaries(start, end, interval, extra, expected):
     for arg in method.args.args:
         arg.annotation = None
     namespace = {
+            "os": __import__("os"),
         "signal": NS(alarm=lambda _: None),
         "torch": NS(amp=NS(GradScaler=lambda *a, **k: None)),
         "distributed": NS(barrier=lambda: None),

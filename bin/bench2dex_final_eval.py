@@ -16,6 +16,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -202,6 +203,19 @@ def run(args: argparse.Namespace) -> None:
         fail("base model or tokenizer missing")
     if not args.scene.is_file():
         fail("task scene missing")
+    if not args.policy_python.is_file():
+        fail("policy Python missing")
+    scene_description = subprocess.check_output(
+        [
+            str(args.policy_python),
+            "-c",
+            "import sys,yaml; print(yaml.safe_load(open(sys.argv[1], encoding='utf-8'))['description'])",
+            str(args.scene),
+        ],
+        text=True,
+    ).strip()
+    if scene_description != manifest.get("task_description"):
+        fail("task scene description differs from the audited manifest; re-audit before evaluation")
     if not args.robot_map.is_file():
         fail("active-DOF robot map missing")
     if not args.policy_python.is_file() or not args.sim_python.is_file():
@@ -210,6 +224,10 @@ def run(args: argparse.Namespace) -> None:
         fail("Bench2Dex runner missing")
     if not (args.bench_repo / "tools/export/export_video.py").is_file():
         fail("Bench2Dex video exporter missing")
+    sys.path.insert(0, str(args.policy_repo.resolve()))
+    from cosmos_policy.experiments.robot.bench2dex.source import exact_git_state, source_hash
+
+    cosmos_revision, cosmos_dirty = exact_git_state(args.policy_repo)
     policy_steps, physics_steps, expert_steps = budget(args.scene)
     args.output.mkdir(parents=True, exist_ok=True)
     if str(args.output.resolve()).startswith("/inspire/") and not str(args.output.resolve()).startswith("/inspire/hdd2/"):
@@ -225,9 +243,13 @@ def run(args: argparse.Namespace) -> None:
         "manifest_sha256": file_sha256(args.manifest),
         "embedding_sha256": file_sha256(args.embedding),
         "evaluation_runner_sha256": file_sha256(Path(__file__)),
-        "cosmos_revision": git_head(args.policy_repo),
+        "cosmos_revision": cosmos_revision,
+        "cosmos_dirty": cosmos_dirty,
+        "cosmos_source_sha256": source_hash(args.policy_repo),
         "bench2dex_revision": git_head(args.bench_repo),
         "scene": str(args.scene.resolve()),
+        "scene_sha256": file_sha256(args.scene),
+        "task_description": manifest["task_description"],
         "anchor_dir": str(args.anchor_dir.resolve()),
         "channels": list(CHANNELS),
         "physics_device": "cpu",
@@ -240,6 +262,7 @@ def run(args: argparse.Namespace) -> None:
     }
     protocol_file = args.output / "protocol.json"
     if embodiment_manifest:
+        protocol["embodiment_manifest"] = str(Path(embodiment_manifest).resolve())
         protocol["embodiment_manifest_sha256"] = file_sha256(embodiment_manifest)
         protocol["training_scope"] = "embodiment"
     if protocol_file.exists() and json.loads(protocol_file.read_text()) != protocol:

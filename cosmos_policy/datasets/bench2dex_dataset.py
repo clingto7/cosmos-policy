@@ -53,6 +53,7 @@ class RobotProfile:
     active_joint_names: tuple[str, ...]
     # (mimic name, source name, multiplier, offset), in dependency order.
     mimic_rules: tuple[tuple[str, str, float, float], ...] = ()
+    inactive_joint_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         full = self.full_joint_names
@@ -61,7 +62,10 @@ class RobotProfile:
             raise ValueError("robot profile needs a key and unique joint names")
         if not active or not set(active).issubset(full):
             raise ValueError("active joints must be a nonempty subset of full joints")
-        resolved = set(active)
+        inactive = self.inactive_joint_names
+        if len(set(inactive)) != len(inactive) or not set(inactive).issubset(full) or set(active) & set(inactive):
+            raise ValueError("inactive joints must be unique full joints disjoint from active joints")
+        resolved = set(active) | set(inactive)
         for mimic, source, multiplier, offset in self.mimic_rules:
             if mimic not in full or mimic in resolved or source not in resolved:
                 raise ValueError(f"invalid or unordered mimic rule: {mimic} <- {source}")
@@ -82,6 +86,7 @@ class RobotProfile:
             robot_key=self.robot_key,
             full_joint_names=self.full_joint_names,
             active_joint_names=self.active_joint_names,
+            inactive_joint_names=tuple(name for name in self.inactive_joint_names if name not in {full[rule[0]] for rule in info.mimic_rules}),
             mimic_rules=tuple(
                 (full[mimic], full[source], float(mult), float(offset))
                 for mimic, source, mult, offset in info.mimic_rules
@@ -106,6 +111,7 @@ class RobotProfile:
         ):
             raise ValueError("runtime joint names do not match robot profile")
         by_name = dict(zip(self.active_joint_names, values.T))
+        by_name.update({name: np.zeros(values.shape[0], dtype=values.dtype) for name in self.inactive_joint_names})
         for mimic, source, multiplier, offset in self.mimic_rules:
             by_name[mimic] = by_name[source] * multiplier + offset
         if set(by_name) != set(self.full_joint_names):

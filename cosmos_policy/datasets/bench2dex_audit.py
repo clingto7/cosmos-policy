@@ -47,7 +47,12 @@ def load_profile(robot_map: str | Path, robot_key: str) -> RobotProfile:
     if robot_key not in robots:
         raise ValueError(f"robot_key={robot_key!r} not found in {robot_map}")
     entry = robots[robot_key]
-    return RobotProfile(robot_key, tuple(entry["full_joint_names"]), tuple(entry["active_joint_names"]))
+    return RobotProfile(
+        robot_key,
+        tuple(entry["full_joint_names"]),
+        tuple(entry["active_joint_names"]),
+        inactive_joint_names=tuple(entry.get("inactive_joint_names", ())),
+    )
 
 
 def load_task_description(scene: str | Path) -> str:

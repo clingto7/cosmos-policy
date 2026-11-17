@@ -47,6 +47,14 @@ def test_resume_ignores_abandoned_updates_and_partial_append(run):
     assert result["mean_seconds"] == 3.4 and result["speed_updates"] == 1
 
 
+def test_packaged_deployment_is_accepted_without_a_cosmos_git_checkout(run):
+    path = run / "deployment.json"
+    deployment = json.loads(path.read_text())
+    deployment.update(commit=None, dirty=None, source_kind="packaged")
+    path.write_text(json.dumps(deployment))
+    assert status.inspect(run)["ready"]
+
+
 def test_wrong_resolved_schedule_rejected(run):
     path = run / "resolved-training.json"
     value = json.loads(path.read_text())

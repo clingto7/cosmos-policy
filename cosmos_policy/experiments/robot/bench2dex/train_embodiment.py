@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import importlib.metadata
 import json
 import os
@@ -21,6 +20,7 @@ from cosmos_policy.experiments.robot.bench2dex.checkpoints import (
     file_hash,
     require_checkpoint_contract,
 )
+from cosmos_policy.experiments.robot.bench2dex.source import exact_git_state, source_hash
 
 PRIVATE_ROOT = Path("/inspire/hdd2/project/roboticsystem2/ky26063")
 
@@ -29,14 +29,6 @@ def check_output_path(path: Path):
     resolved = path.resolve()
     if str(resolved).startswith("/inspire/") and not resolved.is_relative_to(PRIVATE_ROOT):
         raise ValueError(f"training output must resolve under {PRIVATE_ROOT}")
-
-
-def source_hash(repo: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted((repo / "cosmos_policy").rglob("*.py")):
-        digest.update(str(path.relative_to(repo)).encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
 
 
 def environment_versions():
@@ -181,11 +173,11 @@ def execute_run(args, command, identity, run_dir):
             raise ValueError("dataset monitoring summary changed since launch")
         atomic_json(summary_path, summary)
         atomic_json(run_dir / "manifest.snapshot.json", bundle)
-        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=args.repo, capture_output=True, text=True)
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=args.repo, capture_output=True, text=True)
+        revision, dirty = exact_git_state(args.repo)
         atomic_json(run_dir / "deployment.json", {
-            "commit": revision.stdout.strip() if revision.returncode == 0 else None,
-            "dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+            "commit": revision,
+            "dirty": dirty,
+            "source_kind": "git" if revision else "packaged",
             "source_sha256": identity["source_sha256"],
         })
         environment = os.environ.copy()

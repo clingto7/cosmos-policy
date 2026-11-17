@@ -51,7 +51,11 @@ def inspect(run, max_age=300, verify_checkpoints=False):
             errors.append(message)
 
     check(deploy["source_sha256"] == identity["source_sha256"], "deployment source differs from identity")
-    check(deploy.get("dirty") is False, "deployment was dirty or unverified")
+    check(
+        deploy.get("dirty") is False
+        or (deploy.get("source_kind") == "packaged" and deploy.get("dirty") is None),
+        "deployment was dirty or unverified",
+    )
     pairs = [
         (config["trainer"]["max_iter"], identity["max_iter"], "max_iter"),
         (config["trainer"]["grad_accum_iter"], identity["grad_accum_iter"], "accumulation"),

@@ -17,7 +17,6 @@ from cosmos_policy.experiments.robot.bench2dex.runtime import (
     profile_with_urdf_mimics,
 )
 
-
 ACTIVE = tuple(f"joint_{index}" for index in range(26))
 MIMIC = tuple(f"mimic_{index}" for index in range(8))
 FULL = ACTIVE + MIMIC
@@ -53,6 +52,27 @@ def make_observation() -> dict:
 
 
 class Bench2DexRuntimeTest(unittest.TestCase):
+    def test_registered_inactive_joint_is_zero_but_unknown_joint_fails(self) -> None:
+        active = np.asarray([[0.25], [0.5]], dtype=np.float32)
+        profile = RobotProfile("robot", ("active", "inactive"), ("active",), inactive_joint_names=("inactive",))
+        np.testing.assert_array_equal(profile.expand(active, ("inactive", "active"))[:, 0], [0, 0])
+        with self.assertRaisesRegex(ValueError, "unmapped runtime joints"):
+            RobotProfile("robot", ("active", "unknown"), ("active",)).expand(
+                active, ("active", "unknown")
+            )
+
+    def test_inactive_joint_can_source_a_urdf_mimic(self) -> None:
+        profile = RobotProfile(
+            "robot", ("active", "inactive", "mimic"), ("active",), inactive_joint_names=("inactive",)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            urdf = Path(directory) / "robot.urdf"
+            urdf.write_text("<robot><joint name='mimic'><mimic joint='inactive' multiplier='2'/></joint></robot>")
+            resolved = profile_with_urdf_mimics(profile, urdf, 1)
+        np.testing.assert_array_equal(
+            resolved.expand(np.asarray([[1]], dtype=np.float32), resolved.full_joint_names), [[1, 0, 0]]
+        )
+
     def test_inference_rgb_matches_training_frame_from_same_jpeg(self) -> None:
         from cosmos_policy.datasets.bench2dex_dataset import _image
         from cosmos_policy.experiments.robot.bench2dex.runtime import prepare_bench2dex_model_observation

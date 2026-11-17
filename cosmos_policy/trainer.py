@@ -84,7 +84,6 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         log.info("Starting training...")
         self.callbacks.on_train_start(model, iteration=iteration)
         checkpoint_control = None
-        last_saved_iteration = None
         if os.environ.get("BENCH2DEX_EMBODIMENT_MANIFEST"):
             from cosmos_policy.experiments.robot.bench2dex.checkpoint_control import CheckpointControl
 
@@ -152,7 +151,7 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
                     # Save checkpoint.
                     periodic_save = (
                         iteration % self.config.checkpoint.save_iter == 0
-                        or iteration in self.config.checkpoint.extra_save_iters
+                        or iteration in getattr(self.config.checkpoint, "extra_save_iters", ())
                     )
 
                     def save_checkpoint():

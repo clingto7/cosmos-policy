@@ -102,7 +102,12 @@ def _audit_one(record: dict[str, Any], *, expected_count: int) -> dict[str, Any]
         if "active_dof" in robot_entry and int(robot_entry["active_dof"]) != len(active_indices):
             raise ValueError(f"active_dof mismatch for robot {record['robot_key']}")
         active_joint_names = tuple(full_joint_names[index] for index in active_indices)
-    profile = RobotProfile(record["robot_key"], tuple(robot_entry["full_joint_names"]), active_joint_names)
+    profile = RobotProfile(
+        record["robot_key"],
+        tuple(robot_entry["full_joint_names"]),
+        active_joint_names,
+        inactive_joint_names=tuple(robot_entry.get("inactive_joint_names", ())),
+    )
     description = load_task_description(record["scene"])
     reference_hashes = load_sha256sum(record["yk_sha256"]) if record.get("yk_sha256") else None
     manifest, statistics = audit_task(

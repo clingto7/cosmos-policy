@@ -154,7 +154,8 @@ def profile_with_urdf_mimics(
                 float(mimic.get("multiplier", "1.0")),
                 float(mimic.get("offset", "0.0")),
             )
-    resolved = set(profile.active_joint_names)
+    inactive = tuple(name for name in profile.inactive_joint_names if name not in raw_rules)
+    resolved = set(profile.active_joint_names) | set(inactive)
     rules = []
     while raw_rules:
         ready = [name for name, (source, _, _) in raw_rules.items() if source in resolved]
@@ -166,7 +167,13 @@ def profile_with_urdf_mimics(
             resolved.add(name)
     if len(rules) != expected_mimic_count:
         raise ValueError(f"expected {expected_mimic_count} mimic rules in {path}, found {len(rules)}")
-    return RobotProfile(profile.robot_key, profile.full_joint_names, profile.active_joint_names, tuple(rules))
+    return RobotProfile(
+        profile.robot_key,
+        profile.full_joint_names,
+        profile.active_joint_names,
+        tuple(rules),
+        inactive_joint_names=inactive,
+    )
 
 
 def handle_rpc_command(adapter: Bench2DexPolicyAdapter, message: dict[str, Any]) -> dict[str, Any]:

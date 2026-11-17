@@ -420,7 +420,7 @@ def main() -> None:
         "--trained-with-image-aug",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use the historical PIL resize and 90% center crop (default: match Bench2Dex training images).",
+        help="Use the historical PIL resize and 90%% center crop (default: match Bench2Dex training images).",
     )
     parser.add_argument("--checkpoint-id", default="", help="Stable label to record in simulator result metadata.")
     args = parser.parse_args()
